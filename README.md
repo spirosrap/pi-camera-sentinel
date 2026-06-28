@@ -31,7 +31,7 @@ For stability, use a strong 5V Pi power supply and a short power cable. If the w
 On the Pi:
 
 ```bash
-git clone https://github.com/YOURNAME/pi-camera-sentinel.git
+git clone https://github.com/spirosrap/pi-camera-sentinel.git
 cd pi-camera-sentinel
 sudo scripts/install.sh
 ```

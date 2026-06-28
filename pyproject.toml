@@ -18,6 +18,11 @@ dependencies = [
 ]
 keywords = ["raspberry-pi", "webcam", "telegram", "tailscale", "motion-detection", "ustreamer"]
 
+[project.urls]
+Homepage = "https://github.com/spirosrap/pi-camera-sentinel"
+Repository = "https://github.com/spirosrap/pi-camera-sentinel"
+Issues = "https://github.com/spirosrap/pi-camera-sentinel/issues"
+
 [project.optional-dependencies]
 dev = [
   "pytest>=8"
