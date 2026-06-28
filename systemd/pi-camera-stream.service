@@ -1,0 +1,14 @@
+[Unit]
+Description=Pi Camera Sentinel USB webcam stream
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/pi-camera-sentinel.env
+ExecStart=/usr/bin/ustreamer --device ${SENTINEL_CAMERA_DEVICE} --host 0.0.0.0 --port 8080 --resolution 1280x720 --format MJPEG --encoder HW --desired-fps 15 --persistent --device-timeout 4 --device-error-delay 2 --slowdown
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
