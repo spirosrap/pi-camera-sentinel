@@ -52,6 +52,18 @@ class Settings:
     video_fps: int
     retention_files: int
     camera_device: str
+    exposure_watchdog_interval: float
+    exposure_settle_seconds: float
+    exposure_dark_mean_max: float
+    exposure_dark_ratio_min: float
+    exposure_dark_pixel_max: int
+    exposure_bright_mean_min: float
+    exposure_bright_ratio_min: float
+    exposure_bright_pixel_min: int
+    exposure_resize_width: int
+    exposure_resize_height: int
+    exposure_day_profile: str
+    exposure_night_profile: str
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -76,6 +88,18 @@ class Settings:
             video_fps=env_int("SENTINEL_VIDEO_FPS", 10),
             retention_files=env_int("SENTINEL_RETENTION_FILES", 200),
             camera_device=env_str("SENTINEL_CAMERA_DEVICE", "/dev/video0"),
+            exposure_watchdog_interval=env_float("SENTINEL_EXPOSURE_WATCHDOG_INTERVAL", 60.0),
+            exposure_settle_seconds=env_float("SENTINEL_EXPOSURE_SETTLE_SECONDS", 8.0),
+            exposure_dark_mean_max=env_float("SENTINEL_EXPOSURE_DARK_MEAN_MAX", 15.0),
+            exposure_dark_ratio_min=env_float("SENTINEL_EXPOSURE_DARK_RATIO_MIN", 0.90),
+            exposure_dark_pixel_max=env_int("SENTINEL_EXPOSURE_DARK_PIXEL_MAX", 25),
+            exposure_bright_mean_min=env_float("SENTINEL_EXPOSURE_BRIGHT_MEAN_MIN", 230.0),
+            exposure_bright_ratio_min=env_float("SENTINEL_EXPOSURE_BRIGHT_RATIO_MIN", 0.85),
+            exposure_bright_pixel_min=env_int("SENTINEL_EXPOSURE_BRIGHT_PIXEL_MIN", 180),
+            exposure_resize_width=env_int("SENTINEL_EXPOSURE_RESIZE_WIDTH", 160),
+            exposure_resize_height=env_int("SENTINEL_EXPOSURE_RESIZE_HEIGHT", 90),
+            exposure_day_profile=env_str("SENTINEL_EXPOSURE_DAY_PROFILE", "auto"),
+            exposure_night_profile=env_str("SENTINEL_EXPOSURE_NIGHT_PROFILE", "low-light"),
         )
 
     def missing_telegram_fields(self) -> list[str]:

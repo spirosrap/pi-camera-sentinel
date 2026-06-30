@@ -7,11 +7,11 @@
 - Tailscale Serve helper
 - health check command
 - camera tuning profiles
+- exposure watchdog for black/washed-out frames
 - systemd installer
 
 ## Good Next Features
 
-- profile persistence through a drop-in systemd unit
 - optional Home Assistant webhook output
 - masked zones for motion detection
 - quiet hours

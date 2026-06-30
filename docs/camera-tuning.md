@@ -39,6 +39,38 @@ ExecStartPre=/usr/local/bin/pi-camera-sentinel camera-profile outdoor-shade
 
 Camera controls can block briefly while the device is streaming, so applying a profile before starting `ustreamer` is more reliable.
 
+## Exposure Watchdog
+
+The exposure watchdog samples the current snapshot and applies a profile only when the image is clearly unusable:
+
+- mostly black: apply `SENTINEL_EXPOSURE_NIGHT_PROFILE`
+- mostly white: apply `SENTINEL_EXPOSURE_DAY_PROFILE`
+- normal frame: hold the current settings
+
+Enable it:
+
+```bash
+sudo systemctl enable --now pi-camera-exposure-watchdog.service
+```
+
+Run one cycle manually:
+
+```bash
+sudo sh -c 'set -a; . /etc/pi-camera-sentinel.env; set +a; pi-camera-sentinel exposure-step --json'
+```
+
+Useful config:
+
+```text
+SENTINEL_EXPOSURE_WATCHDOG_INTERVAL=60
+SENTINEL_EXPOSURE_DAY_PROFILE=auto
+SENTINEL_EXPOSURE_NIGHT_PROFILE=low-light
+SENTINEL_EXPOSURE_DARK_MEAN_MAX=15
+SENTINEL_EXPOSURE_BRIGHT_MEAN_MIN=230
+```
+
+This is more reliable than switching by clock time because it responds to the actual image: clouds, shade, outdoor lights, or a camera pointed at a bright bowl can all confuse fixed schedules.
+
 ## Power And USB Problems
 
 If the feed says "no signal", freezes, or the camera disappears, check logs:

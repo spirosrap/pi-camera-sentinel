@@ -12,6 +12,7 @@ This project is intentionally small: no cloud camera account, no public port for
 - Sends Telegram photo alerts on motion.
 - Can attach short video clips if enabled.
 - Provides camera profiles for common USB webcam exposure issues.
+- Can automatically switch between day and low-light exposure profiles.
 - Includes health checks for feed availability and Pi undervoltage warnings.
 
 ## Hardware
@@ -47,6 +48,12 @@ Start the camera feed:
 ```bash
 sudo systemctl enable --now pi-camera-stream.service
 pi-camera-sentinel healthcheck
+```
+
+Enable automatic exposure recovery:
+
+```bash
+sudo systemctl enable --now pi-camera-exposure-watchdog.service
 ```
 
 Open the local feed:
@@ -111,6 +118,12 @@ Available profiles:
 - `low-light`
 
 See [docs/camera-tuning.md](docs/camera-tuning.md).
+
+Enable automatic day/night recovery:
+
+```bash
+sudo systemctl enable --now pi-camera-exposure-watchdog.service
+```
 
 ## Motion Tuning
 

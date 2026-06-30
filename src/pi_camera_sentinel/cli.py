@@ -13,6 +13,7 @@ import requests
 
 from .camera import PROFILES, apply_profile, controls_json, list_controls
 from .config import Settings
+from .exposure import exposure_watchdog_step
 from .health import check_health
 from .motion import changed_pixel_ratio, fetch_snapshot, normalize_image, summarize_ratios
 from .telegram import get_chat_ids, send_message, send_photo, send_video
@@ -230,6 +231,30 @@ def cmd_camera_get(settings: Settings, _args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_exposure_step(settings: Settings, args: argparse.Namespace) -> int:
+    result = exposure_watchdog_step(settings)
+    if args.json:
+        print(json.dumps(result.to_dict(), sort_keys=True))
+    return 0
+
+
+def cmd_exposure_watchdog(settings: Settings, _args: argparse.Namespace) -> int:
+    LOG.info(
+        "starting exposure watchdog interval=%ss snapshot=%s",
+        settings.exposure_watchdog_interval,
+        settings.snapshot_url,
+    )
+    while True:
+        try:
+            exposure_watchdog_step(settings)
+        except KeyboardInterrupt:
+            LOG.info("stopping")
+            return 0
+        except Exception:
+            LOG.exception("exposure watchdog cycle failed")
+        time.sleep(settings.exposure_watchdog_interval)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Private Raspberry Pi USB camera sentinel.")
     parser.add_argument("--verbose", action="store_true", help="enable debug logging")
@@ -246,6 +271,14 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("healthcheck", help="check snapshot, camera, and undervoltage status").set_defaults(func=cmd_health)
     subparsers.add_parser("camera-controls", help="list v4l2 camera controls").set_defaults(func=cmd_camera_controls)
     subparsers.add_parser("camera-get", help="print common camera controls as JSON").set_defaults(func=cmd_camera_get)
+
+    exposure_once = subparsers.add_parser("exposure-step", help="sample the image once and apply day/night profile if needed")
+    exposure_once.add_argument("--json", action="store_true", help="print decision as JSON")
+    exposure_once.set_defaults(func=cmd_exposure_step)
+
+    subparsers.add_parser("exposure-watchdog", help="continuously adjust camera profile when image is too dark or washed out").set_defaults(
+        func=cmd_exposure_watchdog
+    )
 
     profile = subparsers.add_parser("camera-profile", help="apply a named v4l2 camera profile")
     profile.add_argument("profile", choices=sorted(PROFILES))
