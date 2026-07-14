@@ -10,6 +10,7 @@
 - private web dashboard and same-origin stream proxy
 - dashboard camera profile and manual tuning controls
 - dashboard motion-alert and exposure-watchdog state with pause controls
+- filterable event history with archive totals and pagination
 - camera tuning profiles
 - exposure watchdog for black/washed-out frames
 - systemd installer
@@ -20,7 +21,6 @@
 - masked zones for motion detection
 - quiet hours
 - alert batching
-- event metadata and alert history
 
 ## Non-Goals For Now
 

@@ -14,7 +14,10 @@ const elements = {
   captureTime: document.querySelector("#capture-time"),
   dialogClose: document.querySelector("#dialog-close"),
   eventGrid: document.querySelector("#event-grid"),
+  eventPagination: document.querySelector("#event-pagination"),
+  eventRangeControls: document.querySelector("#event-range-controls"),
   eventsEmpty: document.querySelector("#events-empty"),
+  eventsLoadMore: document.querySelector("#events-load-more"),
   eventsMeta: document.querySelector("#events-meta"),
   exposureDetail: document.querySelector("#exposure-detail"),
   exposureValue: document.querySelector("#exposure-value"),
@@ -52,6 +55,11 @@ const viewState = {
   cameraBusy: false,
   cameraState: null,
   dirtyControls: new Set(),
+  eventCursor: null,
+  eventSummary: null,
+  eventWindow: "24h",
+  events: [],
+  eventsBusy: false,
   paused: false,
   serviceBusy: new Set(),
   serviceStates: {},
@@ -76,6 +84,7 @@ const serviceElements = {
 const rangeInputs = [...document.querySelectorAll('.range-control input[type="range"]')];
 const controlInputs = [...document.querySelectorAll("[data-control]")];
 const profileButtons = [...elements.profileControls.querySelectorAll("[data-profile]")];
+const eventRangeButtons = [...elements.eventRangeControls.querySelectorAll("[data-event-window]")];
 
 const dateTime = new Intl.DateTimeFormat(undefined, {
   dateStyle: "medium",
@@ -522,20 +531,72 @@ function createEventItem(event) {
   return button;
 }
 
-async function refreshEvents() {
-  try {
-    const response = await fetch("/api/events", { cache: "no-store" });
-    if (!response.ok) throw new Error(`Events request failed: ${response.status}`);
-    const { events } = await response.json();
-    elements.eventGrid.replaceChildren(...events.map(createEventItem));
-    elements.eventsEmpty.hidden = events.length > 0;
-    elements.eventsMeta.textContent = events.length ? `${events.length} most recent frames` : "No saved events";
-  } catch (error) {
-    elements.eventGrid.replaceChildren();
-    elements.eventsEmpty.hidden = false;
-    elements.eventsEmpty.textContent = error.message;
-    elements.eventsMeta.textContent = "Archive unavailable";
+function setEventsBusy(busy) {
+  viewState.eventsBusy = busy;
+  eventRangeButtons.forEach((button) => {
+    button.disabled = busy;
+  });
+  elements.eventsLoadMore.disabled = busy;
+  elements.eventsLoadMore.textContent = busy ? "Loading captures" : "Load older captures";
+}
+
+function renderEventSummary() {
+  const summary = viewState.eventSummary;
+  if (!summary) return;
+  const shown = viewState.events.length;
+  const storage = formatBytes(summary.retained_size_bytes);
+  if (viewState.eventWindow === "all") {
+    elements.eventsMeta.textContent = `${shown} shown / ${summary.retained_count} retained / ${storage}`;
+  } else {
+    const label = viewState.eventWindow === "24h" ? "24 hours" : "7 days";
+    elements.eventsMeta.textContent = `${shown} shown / ${summary.window_count} in ${label} / ${summary.retained_count} retained / ${storage}`;
   }
+}
+
+function renderEvents() {
+  elements.eventGrid.replaceChildren(...viewState.events.map(createEventItem));
+  elements.eventsEmpty.hidden = viewState.events.length > 0;
+  elements.eventsEmpty.textContent = "No motion captures in this range.";
+  elements.eventPagination.hidden = viewState.eventCursor == null;
+  renderEventSummary();
+}
+
+async function refreshEvents({ append = false } = {}) {
+  if (viewState.eventsBusy) return;
+  setEventsBusy(true);
+  try {
+    const query = new URLSearchParams({ window: viewState.eventWindow, limit: "12" });
+    if (append && viewState.eventCursor != null) query.set("before", String(viewState.eventCursor));
+    const payload = await requestJSON(`/api/events?${query}`);
+    viewState.events = append ? [...viewState.events, ...payload.events] : payload.events;
+    viewState.eventCursor = payload.next_before;
+    viewState.eventSummary = payload.summary;
+    renderEvents();
+  } catch (error) {
+    if (!append) {
+      viewState.events = [];
+      viewState.eventCursor = null;
+      viewState.eventSummary = null;
+      elements.eventGrid.replaceChildren();
+      elements.eventsEmpty.hidden = false;
+      elements.eventsEmpty.textContent = error.message;
+    }
+    elements.eventPagination.hidden = append ? viewState.eventCursor == null : true;
+    elements.eventsMeta.textContent = "Archive unavailable";
+  } finally {
+    setEventsBusy(false);
+  }
+}
+
+function selectEventWindow(windowName) {
+  if (viewState.eventsBusy || windowName === viewState.eventWindow) return;
+  viewState.eventWindow = windowName;
+  viewState.eventCursor = null;
+  viewState.events = [];
+  eventRangeButtons.forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.eventWindow === windowName));
+  });
+  refreshEvents();
 }
 
 function updateClock() {
@@ -559,6 +620,10 @@ elements.reconnectButton.addEventListener("click", startStream);
 elements.snapshotButton.addEventListener("click", saveSnapshot);
 elements.fullscreenButton.addEventListener("click", toggleFullscreen);
 elements.cameraRefreshButton.addEventListener("click", () => refreshCameraState("Controls refreshed", true));
+eventRangeButtons.forEach((button) => {
+  button.addEventListener("click", () => selectEventWindow(button.dataset.eventWindow));
+});
+elements.eventsLoadMore.addEventListener("click", () => refreshEvents({ append: true }));
 Object.entries(serviceElements).forEach(([serviceId, target]) => {
   target.toggle.addEventListener("change", () => updateService(serviceId, target.toggle.checked));
 });
@@ -591,6 +656,8 @@ refreshCameraState();
 updateClock();
 setInterval(refreshStatus, 10000);
 setInterval(refreshServices, 10000);
-setInterval(refreshEvents, 30000);
+setInterval(() => {
+  if (viewState.events.length <= 12) refreshEvents();
+}, 30000);
 setInterval(refreshCameraState, 60000);
 setInterval(updateClock, 1000);

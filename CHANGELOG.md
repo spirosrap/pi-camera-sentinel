@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.0 - 2026-07-14
+
+- Add 24-hour, 7-day, and all-time motion-history filters.
+- Add paginated access to older retained captures.
+- Report in-range and retained event counts plus archive storage usage.
+- Add validated event API range, limit, and cursor parameters.
+- Keep longer event browsing sessions stable during periodic dashboard refreshes.
+
 ## 0.4.0 - 2026-07-14
 
 - Add live systemd state for motion alerts and automatic exposure recovery.

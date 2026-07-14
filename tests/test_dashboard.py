@@ -2,11 +2,19 @@ import io
 import os
 from dataclasses import replace
 
+import pytest
 import requests
 from PIL import Image
 
 from pi_camera_sentinel.config import Settings
-from pi_camera_sentinel.dashboard import collect_dashboard_status, list_recent_events, same_origin, with_query
+from pi_camera_sentinel.dashboard import (
+    collect_dashboard_status,
+    event_history,
+    list_recent_events,
+    parse_event_query,
+    same_origin,
+    with_query,
+)
 
 
 class FakeResponse:
@@ -105,6 +113,52 @@ def test_list_recent_events_sorts_and_filters(tmp_path):
 
     assert [event["name"] for event in events] == ["motion-newer.jpg", "motion-older.jpg"]
     assert events[0]["url"] == "/events/motion-newer.jpg"
+
+
+def test_event_history_filters_summarizes_and_paginates(tmp_path):
+    now = 2_000_000.0
+    timestamps = [now - 60, now - 3600, now - (3 * 86400), now - (10 * 86400)]
+    for index, timestamp in enumerate(timestamps):
+        path = tmp_path / f"motion-{index}.jpg"
+        path.write_bytes(b"x" * (index + 1))
+        os.utime(path, (timestamp, timestamp))
+
+    first_page = event_history(tmp_path, window="24h", limit=1, now=now)
+
+    assert [event["name"] for event in first_page["events"]] == ["motion-0.jpg"]
+    assert first_page["summary"] == {
+        "window_count": 2,
+        "window_size_bytes": 3,
+        "retained_count": 4,
+        "retained_size_bytes": 10,
+        "last_captured_at": "1970-01-24T03:32:20+00:00",
+    }
+    assert first_page["next_before"] == timestamps[0]
+
+    second_page = event_history(
+        tmp_path,
+        window="24h",
+        limit=1,
+        before=first_page["next_before"],
+        now=now,
+    )
+    assert [event["name"] for event in second_page["events"]] == ["motion-1.jpg"]
+    assert second_page["next_before"] is None
+    assert event_history(tmp_path, window="7d", now=now)["summary"]["window_count"] == 3
+    assert event_history(tmp_path, window="all", now=now)["summary"]["window_count"] == 4
+
+
+def test_parse_event_query_validates_range_limit_and_cursor():
+    assert parse_event_query("") == ("24h", 12, None)
+    assert parse_event_query("window=all&limit=24&before=123.5") == ("all", 24, 123.5)
+    with pytest.raises(ValueError, match="window must be one of"):
+        parse_event_query("window=month")
+    with pytest.raises(ValueError, match="limit must be between"):
+        parse_event_query("limit=200")
+    with pytest.raises(ValueError, match="before must be a timestamp"):
+        parse_event_query("before=yesterday")
+    with pytest.raises(ValueError, match="before must be a positive timestamp"):
+        parse_event_query("before=nan")
 
 
 def test_with_query_preserves_existing_upstream_query():

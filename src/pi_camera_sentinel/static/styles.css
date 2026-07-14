@@ -696,6 +696,27 @@ main {
   background: var(--ink);
 }
 
+.events-toolbar {
+  display: flex;
+  align-items: flex-end;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 70%;
+}
+
+.events-toolbar .section-meta {
+  margin: 0;
+  text-align: right;
+}
+
+.event-range-control {
+  grid-template-columns: repeat(3, minmax(82px, 1fr));
+}
+
+.event-range-control button {
+  min-width: 0;
+}
+
 .event-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -755,6 +776,16 @@ main {
   color: var(--muted);
   font-size: 14px;
   text-align: center;
+}
+
+.event-pagination {
+  display: flex;
+  justify-content: center;
+  padding-top: 18px;
+}
+
+.event-pagination[hidden] {
+  display: none;
 }
 
 footer {
@@ -935,6 +966,22 @@ dialog time {
 
   .event-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .events-section .section-heading {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .events-toolbar {
+    align-items: stretch;
+    width: 100%;
+    max-width: none;
+  }
+
+  .events-toolbar .section-meta {
+    text-align: left;
   }
 
   .service-row {

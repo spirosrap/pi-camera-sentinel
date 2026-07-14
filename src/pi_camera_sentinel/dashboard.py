@@ -4,6 +4,7 @@ import datetime as dt
 import io
 import json
 import logging
+import math
 import mimetypes
 import socket
 import subprocess
@@ -35,6 +36,12 @@ PROXY_HEADERS = {
     "expires",
     "pragma",
 }
+EVENT_WINDOWS = {
+    "24h": 24 * 60 * 60,
+    "7d": 7 * 24 * 60 * 60,
+    "all": None,
+}
+MAX_EVENT_PAGE_SIZE = 48
 
 
 def read_system_uptime() -> float | None:
@@ -162,23 +169,97 @@ def collect_dashboard_status(
     }
 
 
-def list_recent_events(directory: Path, limit: int = 12) -> list[dict[str, object]]:
-    if limit <= 0 or not directory.exists():
+def motion_event_records(directory: Path) -> list[tuple[Path, float, int]]:
+    if not directory.exists():
         return []
-    paths = sorted(
-        (path for path in directory.glob("motion-*") if path.is_file() and path.suffix.lower() in {".jpg", ".jpeg", ".png"}),
-        key=lambda path: path.stat().st_mtime,
-        reverse=True,
-    )[:limit]
-    return [
+    records: list[tuple[Path, float, int]] = []
+    for path in directory.glob("motion-*"):
+        if not path.is_file() or path.suffix.lower() not in {".jpg", ".jpeg", ".png"}:
+            continue
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        records.append((path, stat.st_mtime, stat.st_size))
+    return sorted(records, key=lambda record: (record[1], record[0].name), reverse=True)
+
+
+def event_history(
+    directory: Path,
+    *,
+    window: str = "24h",
+    limit: int = 12,
+    before: float | None = None,
+    now: float | None = None,
+) -> dict[str, object]:
+    if window not in EVENT_WINDOWS:
+        raise ValueError("window must be one of: 24h, 7d, all")
+    if limit < 1 or limit > MAX_EVENT_PAGE_SIZE:
+        raise ValueError(f"limit must be between 1 and {MAX_EVENT_PAGE_SIZE}")
+    if before is not None and (not math.isfinite(before) or before <= 0):
+        raise ValueError("before must be a positive timestamp")
+
+    records = motion_event_records(directory)
+    current_time = time.time() if now is None else now
+    window_seconds = EVENT_WINDOWS[window]
+    cutoff = current_time - window_seconds if window_seconds is not None else None
+    window_records = [record for record in records if cutoff is None or record[1] >= cutoff]
+    candidates = [record for record in window_records if before is None or record[1] < before]
+    page = candidates[:limit]
+    has_more = len(candidates) > limit
+    events = [
         {
             "name": path.name,
             "url": f"/events/{quote(path.name)}",
-            "captured_at": dt.datetime.fromtimestamp(path.stat().st_mtime, dt.timezone.utc).isoformat(),
-            "size_bytes": path.stat().st_size,
+            "captured_at": dt.datetime.fromtimestamp(timestamp, dt.timezone.utc).isoformat(),
+            "size_bytes": size,
         }
-        for path in paths
+        for path, timestamp, size in page
     ]
+
+    return {
+        "events": events,
+        "window": window,
+        "summary": {
+            "window_count": len(window_records),
+            "window_size_bytes": sum(record[2] for record in window_records),
+            "retained_count": len(records),
+            "retained_size_bytes": sum(record[2] for record in records),
+            "last_captured_at": (
+                dt.datetime.fromtimestamp(records[0][1], dt.timezone.utc).isoformat()
+                if records
+                else None
+            ),
+        },
+        "next_before": page[-1][1] if has_more and page else None,
+    }
+
+
+def list_recent_events(directory: Path, limit: int = 12) -> list[dict[str, object]]:
+    if limit <= 0:
+        return []
+    return event_history(directory, window="all", limit=limit)["events"]  # type: ignore[return-value]
+
+
+def parse_event_query(query: str) -> tuple[str, int, float | None]:
+    parameters = parse_qs(query, keep_blank_values=True)
+    window = parameters.get("window", ["24h"])[0]
+    try:
+        limit = int(parameters.get("limit", ["12"])[0])
+    except ValueError as exc:
+        raise ValueError("limit must be an integer") from exc
+    before_text = parameters.get("before", [""])[0]
+    try:
+        before = float(before_text) if before_text else None
+    except ValueError as exc:
+        raise ValueError("before must be a timestamp") from exc
+    if window not in EVENT_WINDOWS:
+        raise ValueError("window must be one of: 24h, 7d, all")
+    if limit < 1 or limit > MAX_EVENT_PAGE_SIZE:
+        raise ValueError(f"limit must be between 1 and {MAX_EVENT_PAGE_SIZE}")
+    if before is not None and (not math.isfinite(before) or before <= 0):
+        raise ValueError("before must be a positive timestamp")
+    return window, limit, before
 
 
 def with_query(url: str, query: str) -> str:
@@ -224,8 +305,19 @@ class DashboardApplication:
         self._status_at = now
         return self._status
 
-    def events(self) -> list[dict[str, object]]:
-        return list_recent_events(self.settings.output_dir)
+    def events(
+        self,
+        *,
+        window: str,
+        limit: int,
+        before: float | None,
+    ) -> dict[str, object]:
+        return event_history(
+            self.settings.output_dir,
+            window=window,
+            limit=limit,
+            before=before,
+        )
 
     def camera(self) -> dict[str, object]:
         with self._camera_lock:
@@ -334,7 +426,11 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         elif path == "/api/status":
             self.send_json(self.app.status())
         elif path == "/api/events":
-            self.send_json({"events": self.app.events()})
+            try:
+                window, limit, before = parse_event_query(parsed.query)
+                self.send_json(self.app.events(window=window, limit=limit, before=before))
+            except ValueError as exc:
+                self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
         elif path == "/api/camera":
             self.send_camera_state()
         elif path == "/api/services":

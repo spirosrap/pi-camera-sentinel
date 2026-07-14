@@ -6,8 +6,8 @@
     <meta name="theme-color" content="#171a18">
     <meta name="color-scheme" content="light">
     <title>Pi Camera Sentinel</title>
-    <link rel="stylesheet" href="/assets/styles.css?v=0.4.0">
-    <script src="/assets/app.js?v=0.4.0" defer></script>
+    <link rel="stylesheet" href="/assets/styles.css?v=0.5.0">
+    <script src="/assets/app.js?v=0.5.0" defer></script>
   </head>
   <body>
     <header class="topbar">
@@ -17,7 +17,7 @@
           <span class="brand-kicker">Private camera</span>
           <span class="brand-name-row">
             <strong id="app-title">Pi Camera Sentinel</strong>
-            <span class="app-version" id="app-version">v0.4.0</span>
+            <span class="app-version" id="app-version">v0.5.0</span>
           </span>
         </span>
       </a>
@@ -216,12 +216,22 @@
         <div class="section-heading">
           <div>
             <p class="section-kicker">Motion archive</p>
-            <h2 id="events-heading">Recent captures</h2>
+            <h2 id="events-heading">Event history</h2>
           </div>
-          <p class="section-meta" id="events-meta">Checking for saved events</p>
+          <div class="events-toolbar">
+            <div class="segmented-control event-range-control" id="event-range-controls" role="group" aria-label="Event history range">
+              <button type="button" data-event-window="24h" aria-pressed="true">24 hours</button>
+              <button type="button" data-event-window="7d" aria-pressed="false">7 days</button>
+              <button type="button" data-event-window="all" aria-pressed="false">All</button>
+            </div>
+            <p class="section-meta" id="events-meta" role="status" aria-live="polite">Checking for saved events</p>
+          </div>
         </div>
         <div class="event-grid" id="event-grid"></div>
-        <p class="empty-state" id="events-empty" hidden>No motion captures saved yet.</p>
+        <p class="empty-state" id="events-empty" hidden>No motion captures in this range.</p>
+        <div class="event-pagination" id="event-pagination" hidden>
+          <button type="button" id="events-load-more">Load older captures</button>
+        </div>
       </section>
     </main>
 

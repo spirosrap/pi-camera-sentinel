@@ -7,7 +7,7 @@ This project is intentionally small: no cloud camera account, no public port for
 ## What It Does
 
 - Streams a USB webcam from a Raspberry Pi over HTTP.
-- Presents a private, responsive dashboard with live status and recent motion captures.
+- Presents a private, responsive dashboard with live status and filterable motion history.
 - Optionally exposes the feed privately through Tailscale Serve.
 - Watches snapshots for motion using frame differencing.
 - Sends Telegram photo alerts on motion.
@@ -115,8 +115,11 @@ The `pi-camera-sentinel serve` command provides a small same-origin web app on p
 - camera, power, temperature, uptime, and storage status
 - motion-alert and exposure-recovery state with pause and resume toggles
 - camera profiles plus safe manual exposure, color, gain, sharpness, and white-balance controls
-- the most recent retained motion snapshots
+- retained motion snapshots with 24-hour, 7-day, and all-time filters
+- archive totals and paginated access to older captures
 - `/healthz`, `/api/status`, and `/api/camera` endpoints for monitoring and control
+
+The event API at `/api/events` accepts a validated `window` (`24h`, `7d`, or `all`), a page `limit`, and an optional `before` cursor. Responses include retained-file counts and storage totals as well as the current page.
 
 The server proxies `/stream` and `/snapshot` to `ustreamer`, which keeps the raw camera port private when Tailscale Serve points at the dashboard.
 
