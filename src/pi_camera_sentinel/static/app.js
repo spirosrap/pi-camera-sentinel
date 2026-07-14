@@ -2,6 +2,7 @@
 
 const elements = {
   appTitle: document.querySelector("#app-title"),
+  appVersion: document.querySelector("#app-version"),
   autoExposureToggle: document.querySelector("#auto-exposure-toggle"),
   autoWhiteBalanceToggle: document.querySelector("#auto-white-balance-toggle"),
   cameraApplyButton: document.querySelector("#camera-apply-button"),
@@ -33,6 +34,7 @@ const elements = {
   powerValue: document.querySelector("#power-value"),
   profileControls: document.querySelector("#profile-controls"),
   reconnectButton: document.querySelector("#reconnect-button"),
+  servicesMeta: document.querySelector("#services-meta"),
   snapshotButton: document.querySelector("#snapshot-button"),
   storageDetail: document.querySelector("#storage-detail"),
   storageValue: document.querySelector("#storage-value"),
@@ -51,7 +53,24 @@ const viewState = {
   cameraState: null,
   dirtyControls: new Set(),
   paused: false,
+  serviceBusy: new Set(),
+  serviceStates: {},
   streamLoaded: false,
+};
+
+const serviceElements = {
+  motion: {
+    detail: document.querySelector("#motion-service-detail"),
+    row: document.querySelector("#motion-service-row"),
+    state: document.querySelector("#motion-service-state"),
+    toggle: document.querySelector("#motion-service-toggle"),
+  },
+  watchdog: {
+    detail: document.querySelector("#watchdog-service-detail"),
+    row: document.querySelector("#watchdog-service-row"),
+    state: document.querySelector("#watchdog-service-state"),
+    toggle: document.querySelector("#watchdog-service-toggle"),
+  },
 };
 
 const rangeInputs = [...document.querySelectorAll('.range-control input[type="range"]')];
@@ -112,6 +131,7 @@ function setHealthState(state) {
   };
   elements.healthState.dataset.state = state;
   elements.healthLabel.textContent = labels[state] || "Unknown";
+  elements.healthState.title = labels[state] || "Unknown";
 }
 
 function showStreamNotice(message) {
@@ -166,6 +186,7 @@ function renderStatus(status) {
   const { camera, feed, system, warnings } = status;
   document.title = status.title;
   elements.appTitle.textContent = status.title;
+  elements.appVersion.textContent = `v${status.version}`;
   elements.footerVersion.textContent = `${status.title} v${status.version}`;
   elements.footerHost.textContent = system.hostname;
   elements.cameraSource.textContent = camera.device;
@@ -236,6 +257,71 @@ async function refreshStatus() {
     elements.frameStatus.textContent = error.message;
     showStreamNotice("Dashboard cannot reach the camera service");
   }
+}
+
+function renderService(serviceId, state) {
+  const target = serviceElements[serviceId];
+  if (!target) return;
+  const labels = {
+    active: "Active",
+    failed: "Failed",
+    paused: "Paused",
+    unavailable: "Unavailable",
+  };
+  viewState.serviceStates[serviceId] = state;
+  target.row.dataset.state = state.state;
+  target.state.textContent = labels[state.state] || "Unknown";
+  target.detail.textContent = state.available
+    ? `${state.name} / ${state.sub_state}`
+    : state.error || "System state unavailable";
+  target.toggle.checked = Boolean(state.active);
+  target.toggle.disabled = viewState.serviceBusy.has(serviceId) || !state.available;
+  target.toggle.setAttribute("aria-busy", String(viewState.serviceBusy.has(serviceId)));
+}
+
+function renderServices(services) {
+  Object.entries(services).forEach(([serviceId, state]) => renderService(serviceId, state));
+  const available = Object.values(services).filter((state) => state.available).length;
+  const active = Object.values(services).filter((state) => state.active).length;
+  elements.servicesMeta.textContent = available === 2 ? `${active} of 2 active` : "Service issue";
+}
+
+async function refreshServices() {
+  try {
+    const payload = await requestJSON("/api/services");
+    renderServices(payload.services || {});
+  } catch (error) {
+    elements.servicesMeta.textContent = error.message;
+    Object.keys(serviceElements).forEach((serviceId) => {
+      renderService(serviceId, {
+        active: false,
+        available: false,
+        error: "Service status unavailable",
+        state: "unavailable",
+      });
+    });
+  }
+}
+
+async function updateService(serviceId, active) {
+  viewState.serviceBusy.add(serviceId);
+  const current = viewState.serviceStates[serviceId];
+  if (current) renderService(serviceId, current);
+  elements.servicesMeta.textContent = active ? "Starting service" : "Pausing service";
+  try {
+    const state = await requestJSON(`/api/services/${serviceId}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ active }),
+    });
+    viewState.serviceStates[serviceId] = state;
+  } catch (error) {
+    elements.servicesMeta.textContent = error.message;
+  } finally {
+    viewState.serviceBusy.delete(serviceId);
+    if (viewState.serviceStates[serviceId]) renderService(serviceId, viewState.serviceStates[serviceId]);
+  }
+  await refreshServices();
 }
 
 function setCameraMessage(message, state = "idle") {
@@ -473,6 +559,9 @@ elements.reconnectButton.addEventListener("click", startStream);
 elements.snapshotButton.addEventListener("click", saveSnapshot);
 elements.fullscreenButton.addEventListener("click", toggleFullscreen);
 elements.cameraRefreshButton.addEventListener("click", () => refreshCameraState("Controls refreshed", true));
+Object.entries(serviceElements).forEach(([serviceId, target]) => {
+  target.toggle.addEventListener("change", () => updateService(serviceId, target.toggle.checked));
+});
 elements.tuningForm.addEventListener("submit", applyManualControls);
 profileButtons.forEach((button) => {
   button.addEventListener("click", () => applyProfile(button.dataset.profile, button.textContent));
@@ -496,10 +585,12 @@ document.addEventListener("fullscreenchange", () => {
 
 startStream();
 refreshStatus();
+refreshServices();
 refreshEvents();
 refreshCameraState();
 updateClock();
 setInterval(refreshStatus, 10000);
+setInterval(refreshServices, 10000);
 setInterval(refreshEvents, 30000);
 setInterval(refreshCameraState, 60000);
 setInterval(updateClock, 1000);

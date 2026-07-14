@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0 - 2026-07-14
+
+- Add live systemd state for motion alerts and automatic exposure recovery.
+- Add guarded dashboard toggles to pause or resume either service.
+- Support custom motion and exposure service names through environment settings.
+- Show the installed app version beside the dashboard title.
+- Validate service names and restrict dashboard actions to the two configured roles.
+
 ## 0.3.0 - 2026-07-14
 
 - Add camera profile controls to the private dashboard.

@@ -79,10 +79,16 @@ a:focus-visible {
 .brand {
   display: flex;
   align-items: center;
+  flex: 1 1 auto;
   gap: 11px;
   min-width: 0;
+  overflow: hidden;
   color: inherit;
   text-decoration: none;
+}
+
+.brand > span:last-child {
+  min-width: 0;
 }
 
 .brand-mark {
@@ -140,9 +146,25 @@ a:focus-visible {
   white-space: nowrap;
 }
 
+.brand-name-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.app-version {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
 .health-state {
   display: inline-flex;
   align-items: center;
+  flex: 0 0 auto;
   gap: 8px;
   min-height: 34px;
   padding: 0 11px;
@@ -199,6 +221,7 @@ main {
 }
 
 .viewer-section,
+.monitoring-section,
 .tuning-section,
 .events-section {
   width: 100%;
@@ -356,8 +379,126 @@ main {
   margin-top: 42px;
 }
 
+.monitoring-section,
 .tuning-section {
   margin-top: 42px;
+}
+
+.service-list {
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.service-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  min-height: 78px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.service-row:last-child {
+  border-bottom: 0;
+}
+
+.service-copy,
+.service-action {
+  display: flex;
+  align-items: center;
+}
+
+.service-copy {
+  min-width: 0;
+  gap: 13px;
+}
+
+.service-copy > div {
+  min-width: 0;
+}
+
+.service-copy h3,
+.service-copy p {
+  overflow: hidden;
+  margin: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.service-copy h3 {
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.service-copy p {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.service-signal {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 10px;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+
+.service-row[data-state="active"] .service-signal {
+  background: var(--green);
+}
+
+.service-row[data-state="paused"] .service-signal {
+  background: var(--amber);
+}
+
+.service-row[data-state="failed"] .service-signal,
+.service-row[data-state="unavailable"] .service-signal {
+  background: var(--red);
+}
+
+.service-action {
+  flex: 0 0 auto;
+  gap: 18px;
+}
+
+.service-action strong {
+  min-width: 76px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: right;
+}
+
+.service-row[data-state="active"] .service-action strong {
+  color: var(--green);
+}
+
+.service-row[data-state="paused"] .service-action strong {
+  color: var(--amber);
+}
+
+.service-row[data-state="failed"] .service-action strong,
+.service-row[data-state="unavailable"] .service-action strong {
+  color: var(--red);
+}
+
+.service-toggle {
+  gap: 0;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .tuning-surface {
@@ -720,6 +861,10 @@ dialog time {
     font-size: 15px;
   }
 
+  .brand-name-row {
+    gap: 6px;
+  }
+
   .brand-kicker {
     display: none;
   }
@@ -792,6 +937,23 @@ dialog time {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .service-row {
+    gap: 14px;
+    padding: 14px;
+  }
+
+  .service-copy p {
+    max-width: 48vw;
+  }
+
+  .service-action {
+    gap: 10px;
+  }
+
+  .service-action strong {
+    min-width: 58px;
+  }
+
   .preset-row {
     align-items: stretch;
     flex-direction: column;
@@ -852,6 +1014,38 @@ dialog time {
 
   .event-grid {
     grid-template-columns: 1fr;
+  }
+
+  .service-row {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .service-copy p {
+    max-width: none;
+  }
+
+  .service-action {
+    justify-content: space-between;
+    padding-left: 23px;
+  }
+
+  .service-action strong {
+    text-align: left;
+  }
+}
+
+@media (max-width: 350px) {
+  .health-state #health-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
   }
 }
 

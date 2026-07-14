@@ -69,6 +69,8 @@ class Settings:
     dashboard_port: int
     dashboard_title: str
     dashboard_status_cache_seconds: float
+    motion_service: str
+    exposure_service: str
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -110,6 +112,11 @@ class Settings:
             dashboard_port=env_int("SENTINEL_DASHBOARD_PORT", 8090),
             dashboard_title=env_str("SENTINEL_DASHBOARD_TITLE", "Pi Camera Sentinel"),
             dashboard_status_cache_seconds=env_float("SENTINEL_DASHBOARD_STATUS_CACHE_SECONDS", 5.0),
+            motion_service=env_str("SENTINEL_MOTION_SERVICE", "pi-camera-motion.service"),
+            exposure_service=env_str(
+                "SENTINEL_EXPOSURE_SERVICE",
+                "pi-camera-exposure-watchdog.service",
+            ),
         )
 
     def missing_telegram_fields(self) -> list[str]:

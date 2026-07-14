@@ -16,6 +16,7 @@ This project is intentionally small: no cloud camera account, no public port for
 - Can automatically switch between day and low-light exposure profiles.
 - Includes health checks for feed availability and Pi undervoltage warnings.
 - Reports low storage, CPU temperature, frame freshness, and camera availability.
+- Shows live motion-alert and exposure-watchdog service state with pause and resume controls.
 
 ## Hardware
 
@@ -112,6 +113,7 @@ The `pi-camera-sentinel serve` command provides a small same-origin web app on p
 - live, pause, reconnect, snapshot, and fullscreen controls
 - current frame age, resolution, dropped-frame count, and exposure level
 - camera, power, temperature, uptime, and storage status
+- motion-alert and exposure-recovery state with pause and resume toggles
 - camera profiles plus safe manual exposure, color, gain, sharpness, and white-balance controls
 - the most recent retained motion snapshots
 - `/healthz`, `/api/status`, and `/api/camera` endpoints for monitoring and control
@@ -119,6 +121,8 @@ The `pi-camera-sentinel serve` command provides a small same-origin web app on p
 The server proxies `/stream` and `/snapshot` to `ustreamer`, which keeps the raw camera port private when Tailscale Serve points at the dashboard.
 
 Camera writes accept only known V4L2 controls and integer values inside the device-reported range. Browser writes also require a same-origin JSON request. The dashboard deliberately caps manual gain at `128` and exposure at `250` to avoid the extreme settings that can wash a C920 frame completely white.
+
+The dashboard controls the service names in `SENTINEL_MOTION_SERVICE` and `SENTINEL_EXPOSURE_SERVICE`. The defaults match the included systemd units; installations with custom unit names can override them in `/etc/pi-camera-sentinel.env`.
 
 ## Camera Tuning
 

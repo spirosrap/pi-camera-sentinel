@@ -23,6 +23,7 @@ from . import __version__
 from .camera import apply_profile, camera_state, set_controls
 from .config import Settings
 from .health import disk_status, recent_undervoltage_seen
+from .services import service_state, set_service_active
 
 
 LOG = logging.getLogger("pi-camera-sentinel.dashboard")
@@ -207,6 +208,7 @@ class DashboardApplication:
         self._undervoltage: bool | None = None
         self._undervoltage_at = 0.0
         self._camera_lock = threading.RLock()
+        self._service_lock = threading.RLock()
 
     def status(self) -> dict:
         now = time.monotonic()
@@ -237,6 +239,25 @@ class DashboardApplication:
     def update_camera_controls(self, values: dict[str, int]) -> dict[str, object]:
         with self._camera_lock:
             return set_controls(self.settings.camera_device, values)
+
+    def services(self) -> dict[str, dict[str, object]]:
+        with self._service_lock:
+            return {
+                "motion": service_state(self.settings.motion_service),
+                "watchdog": service_state(self.settings.exposure_service),
+            }
+
+    def update_service(self, service_id: str, active: bool) -> dict[str, object]:
+        service_names = {
+            "motion": self.settings.motion_service,
+            "watchdog": self.settings.exposure_service,
+        }
+        try:
+            service_name = service_names[service_id]
+        except KeyError as exc:
+            raise ValueError("unknown service") from exc
+        with self._service_lock:
+            return set_service_active(service_name, active)
 
 
 class DashboardHTTPServer(ThreadingHTTPServer):
@@ -316,6 +337,8 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             self.send_json({"events": self.app.events()})
         elif path == "/api/camera":
             self.send_camera_state()
+        elif path == "/api/services":
+            self.send_json({"services": self.app.services()})
         elif path == "/healthz":
             payload = self.app.status()
             status = HTTPStatus.OK if payload["ok"] else HTTPStatus.SERVICE_UNAVAILABLE
@@ -332,7 +355,7 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         if not same_origin(self.headers.get("Origin"), self.headers.get("Host")):
-            self.send_json({"error": "cross-origin camera changes are not allowed"}, HTTPStatus.FORBIDDEN)
+            self.send_json({"error": "cross-origin changes are not allowed"}, HTTPStatus.FORBIDDEN)
             return
         try:
             payload = self.read_json_body()
@@ -353,6 +376,13 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                 self.send_json({"error": "controls must be an object"}, HTTPStatus.BAD_REQUEST)
                 return
             self.run_camera_action(lambda: self.app.update_camera_controls(controls))
+        elif path.startswith("/api/services/"):
+            service_id = path.removeprefix("/api/services/")
+            active = payload.get("active")
+            if not isinstance(active, bool):
+                self.send_json({"error": "active must be a boolean"}, HTTPStatus.BAD_REQUEST)
+                return
+            self.run_service_action(lambda: self.app.update_service(service_id, active))
         else:
             self.send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
 
@@ -385,6 +415,15 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         except (OSError, subprocess.SubprocessError) as exc:
             LOG.warning("camera control action failed: %s", exc)
             self.send_json({"error": "camera controls are unavailable"}, HTTPStatus.SERVICE_UNAVAILABLE)
+
+    def run_service_action(self, action: Callable[[], dict[str, object]]) -> None:
+        try:
+            self.send_json(action())
+        except ValueError as exc:
+            self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+        except (OSError, subprocess.SubprocessError) as exc:
+            LOG.warning("service control action failed: %s", exc)
+            self.send_json({"error": "service control is unavailable"}, HTTPStatus.SERVICE_UNAVAILABLE)
 
     def serve_static(self, name: str) -> None:
         target = (STATIC_DIR / name).resolve()

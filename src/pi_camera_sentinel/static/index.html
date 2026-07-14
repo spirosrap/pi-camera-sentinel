@@ -6,8 +6,8 @@
     <meta name="theme-color" content="#171a18">
     <meta name="color-scheme" content="light">
     <title>Pi Camera Sentinel</title>
-    <link rel="stylesheet" href="/assets/styles.css?v=0.3.0">
-    <script src="/assets/app.js?v=0.3.0" defer></script>
+    <link rel="stylesheet" href="/assets/styles.css?v=0.4.0">
+    <script src="/assets/app.js?v=0.4.0" defer></script>
   </head>
   <body>
     <header class="topbar">
@@ -15,7 +15,10 @@
         <span class="brand-mark" aria-hidden="true"><span></span></span>
         <span>
           <span class="brand-kicker">Private camera</span>
-          <strong id="app-title">Pi Camera Sentinel</strong>
+          <span class="brand-name-row">
+            <strong id="app-title">Pi Camera Sentinel</strong>
+            <span class="app-version" id="app-version">v0.4.0</span>
+          </span>
         </span>
       </a>
       <div class="health-state" id="health-state" data-state="loading" role="status" aria-live="polite">
@@ -87,6 +90,54 @@
           <strong id="system-value">--</strong>
           <span class="metric-detail" id="system-detail">--</span>
         </article>
+      </section>
+
+      <section class="monitoring-section" aria-labelledby="monitoring-heading">
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">Automation</p>
+            <h2 id="monitoring-heading">Monitoring</h2>
+          </div>
+          <p class="section-meta" id="services-meta" role="status" aria-live="polite">Checking services</p>
+        </div>
+
+        <div class="service-list">
+          <article class="service-row" id="motion-service-row" data-state="loading">
+            <div class="service-copy">
+              <span class="service-signal" aria-hidden="true"></span>
+              <div>
+                <h3>Motion alerts</h3>
+                <p id="motion-service-detail">Reading system state</p>
+              </div>
+            </div>
+            <div class="service-action">
+              <strong id="motion-service-state">Checking</strong>
+              <label class="toggle-control service-toggle" title="Pause or resume motion alerts">
+                <input type="checkbox" id="motion-service-toggle" disabled>
+                <span class="toggle-track" aria-hidden="true"></span>
+                <span class="visually-hidden">Motion alerts enabled</span>
+              </label>
+            </div>
+          </article>
+
+          <article class="service-row" id="watchdog-service-row" data-state="loading">
+            <div class="service-copy">
+              <span class="service-signal" aria-hidden="true"></span>
+              <div>
+                <h3>Exposure recovery</h3>
+                <p id="watchdog-service-detail">Reading system state</p>
+              </div>
+            </div>
+            <div class="service-action">
+              <strong id="watchdog-service-state">Checking</strong>
+              <label class="toggle-control service-toggle" title="Pause or resume exposure recovery">
+                <input type="checkbox" id="watchdog-service-toggle" disabled>
+                <span class="toggle-track" aria-hidden="true"></span>
+                <span class="visually-hidden">Exposure recovery enabled</span>
+              </label>
+            </div>
+          </article>
+        </div>
       </section>
 
       <section class="tuning-section" aria-labelledby="tuning-heading">
