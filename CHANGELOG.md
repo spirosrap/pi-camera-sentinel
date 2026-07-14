@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.0 - 2026-07-14
+
+- Add optional Home Assistant-compatible JSON webhooks for motion events.
+- Include camera, host, timestamp, changed ratio, capture name, and private event links.
+- Keep webhook failures isolated from Telegram delivery and capture retention.
+- Continue webhook delivery during Telegram quiet hours for local automations.
+- Add a secret-safe dashboard integration state and test action.
+- Add a `send-webhook-test` CLI command without exposing the configured URL.
+
 ## 0.7.0 - 2026-07-14
 
 - Add a pointer- and touch-friendly dashboard editor for ignored motion areas.

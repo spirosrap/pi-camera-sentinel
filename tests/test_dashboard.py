@@ -69,6 +69,7 @@ def test_collect_dashboard_status_for_online_feed(tmp_path):
     assert result["feed"]["height"] == 720
     assert result["feed"]["mean_luma"] == 120.0
     assert result["feed"]["dropped_frames"] == 0
+    assert result["integrations"]["home_assistant"]["configured"] is False
 
 
 def test_collect_dashboard_status_marks_undervoltage_as_degraded(tmp_path):
@@ -211,3 +212,17 @@ def test_dashboard_motion_masks_round_trip(tmp_path):
 
     assert updated["regions"] == [{"x": 0.1, "y": 0.2, "width": 0.3, "height": 0.4}]
     assert app.motion_masks() == updated
+
+
+def test_dashboard_webhook_test_hides_configured_url(monkeypatch, tmp_path):
+    settings = replace(
+        dashboard_settings(tmp_path),
+        webhook_url="https://ha.example/api/webhook/secret-id",
+    )
+    app = DashboardApplication(settings)
+    monkeypatch.setattr("pi_camera_sentinel.dashboard.deliver_webhook", lambda *_args, **_kwargs: 202)
+
+    result = app.send_webhook_test()
+
+    assert result == {"configured": True, "delivered": True, "status_code": 202}
+    assert "secret-id" not in str(result)

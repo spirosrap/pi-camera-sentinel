@@ -25,3 +25,14 @@ def test_sentinel_environment_takes_precedence(monkeypatch):
     monkeypatch.setenv("MOTION_POLL_SECONDS", "9.5")
 
     assert Settings.from_env().poll_seconds == 2.5
+
+
+def test_home_assistant_webhook_configuration(monkeypatch):
+    monkeypatch.setenv("SENTINEL_HOME_ASSISTANT_WEBHOOK_URL", "https://ha.example/api/webhook/id")
+    monkeypatch.setenv("SENTINEL_WEBHOOK_URL", "https://fallback.example/hook")
+    monkeypatch.setenv("SENTINEL_WEBHOOK_TIMEOUT", "2.5")
+
+    settings = Settings.from_env()
+
+    assert settings.webhook_url == "https://ha.example/api/webhook/id"
+    assert settings.webhook_timeout == 2.5

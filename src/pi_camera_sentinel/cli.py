@@ -20,6 +20,7 @@ from .masks import MotionMask, load_motion_masks
 from .motion import changed_pixel_ratio, fetch_snapshot, normalize_image, summarize_ratios
 from .policy import load_alert_policy
 from .telegram import get_chat_ids, send_message, send_photo, send_video
+from .webhook import deliver_webhook, webhook_payload
 
 
 LOG = logging.getLogger("pi-camera-sentinel")
@@ -32,9 +33,13 @@ def configure_logging(verbose: bool = False) -> None:
     )
 
 
-def caption(settings: Settings, ratio: float | None = None) -> str:
-    now = dt.datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
-    text = f"Motion detected at {now}"
+def caption(
+    settings: Settings,
+    ratio: float | None = None,
+    captured_at: dt.datetime | None = None,
+) -> str:
+    current = captured_at or dt.datetime.now().astimezone()
+    text = f"Motion detected at {current.strftime('%Y-%m-%d %H:%M:%S %Z')}"
     if ratio is not None:
         text += f"\nChanged pixels: {ratio:.1%}"
     if settings.feed_url:
@@ -108,10 +113,11 @@ def record_video_clip(settings: Settings, path: Path) -> bool:
 
 def handle_motion_event(settings: Settings, snapshot: bytes, ratio: float) -> None:
     settings.output_dir.mkdir(parents=True, exist_ok=True)
-    stamp = dt.datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
+    captured_at = dt.datetime.now().astimezone()
+    stamp = captured_at.strftime("%Y%m%d-%H%M%S")
     photo_path = settings.output_dir / f"motion-{stamp}.jpg"
     photo_path.write_bytes(snapshot)
-    event_caption = caption(settings, ratio)
+    event_caption = caption(settings, ratio, captured_at)
     LOG.info("motion event: ratio=%.4f photo=%s", ratio, photo_path)
 
     try:
@@ -120,22 +126,36 @@ def handle_motion_event(settings: Settings, snapshot: bytes, ratio: float) -> No
         LOG.warning("could not evaluate alert policy; notifications remain enabled: %s", exc)
         quiet_now = False
 
-    if quiet_now:
-        LOG.info("Telegram notification suppressed by quiet hours; capture remains archived")
+    try:
+        if quiet_now:
+            LOG.info("Telegram notification suppressed by quiet hours; capture remains archived")
+        else:
+            if settings.send_photo:
+                send_photo(settings, photo_path, event_caption)
+            else:
+                send_message(settings, event_caption)
+
+            if settings.send_video:
+                video_path = settings.output_dir / f"motion-{stamp}.mp4"
+                if record_video_clip(settings, video_path):
+                    send_video(settings, video_path, f"Motion clip\n{settings.feed_url}")
+    finally:
+        if settings.webhook_url:
+            try:
+                status_code = deliver_webhook(
+                    settings,
+                    webhook_payload(
+                        settings,
+                        event="motion",
+                        captured_at=captured_at,
+                        ratio=ratio,
+                        capture_path=photo_path,
+                    ),
+                )
+                LOG.info("Home Assistant webhook delivered status=%s", status_code)
+            except Exception as exc:
+                LOG.warning("Home Assistant webhook delivery failed: %s", exc)
         cleanup_old_files(settings.output_dir, settings.retention_files)
-        return
-
-    if settings.send_photo:
-        send_photo(settings, photo_path, event_caption)
-    else:
-        send_message(settings, event_caption)
-
-    if settings.send_video:
-        video_path = settings.output_dir / f"motion-{stamp}.mp4"
-        if record_video_clip(settings, video_path):
-            send_video(settings, video_path, f"Motion clip\n{settings.feed_url}")
-
-    cleanup_old_files(settings.output_dir, settings.retention_files)
 
 
 def cmd_monitor(settings: Settings, _args: argparse.Namespace) -> int:
@@ -235,6 +255,23 @@ def cmd_send_test(settings: Settings, _args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_send_webhook_test(settings: Settings, _args: argparse.Namespace) -> int:
+    try:
+        status_code = deliver_webhook(
+            settings,
+            webhook_payload(
+                settings,
+                event="test",
+                captured_at=dt.datetime.now().astimezone(),
+            ),
+        )
+    except (requests.RequestException, ValueError) as exc:
+        LOG.error("Home Assistant webhook test failed: %s", exc)
+        return 2
+    print(json.dumps({"ok": True, "status_code": status_code}, sort_keys=True))
+    return 0
+
+
 def cmd_show_chat_ids(settings: Settings, _args: argparse.Namespace) -> int:
     for chat in get_chat_ids(settings):
         print(json.dumps(chat, sort_keys=True))
@@ -316,6 +353,9 @@ def build_parser() -> argparse.ArgumentParser:
     sample.set_defaults(func=cmd_sample)
 
     subparsers.add_parser("send-test", help="send one test snapshot to Telegram").set_defaults(func=cmd_send_test)
+    subparsers.add_parser("send-webhook-test", help="send one test event to the configured webhook").set_defaults(
+        func=cmd_send_webhook_test
+    )
     subparsers.add_parser("show-chat-ids", help="print chat IDs from recent bot updates").set_defaults(func=cmd_show_chat_ids)
     subparsers.add_parser("healthcheck", help="check snapshot, camera, and undervoltage status").set_defaults(func=cmd_health)
     subparsers.add_parser("serve", help="serve the web dashboard and camera proxy").set_defaults(func=cmd_serve)

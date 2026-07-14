@@ -68,6 +68,10 @@ const elements = {
   tuningForm: document.querySelector("#tuning-form"),
   warningBanner: document.querySelector("#warning-banner"),
   warningCopy: document.querySelector("#warning-copy"),
+  webhookDetail: document.querySelector("#webhook-detail"),
+  webhookRow: document.querySelector("#webhook-row"),
+  webhookState: document.querySelector("#webhook-state"),
+  webhookTestButton: document.querySelector("#webhook-test"),
 };
 
 const viewState = {
@@ -94,6 +98,8 @@ const viewState = {
   serviceBusy: new Set(),
   serviceStates: {},
   streamLoaded: false,
+  webhookBusy: false,
+  webhookIntegration: null,
 };
 
 const serviceElements = {
@@ -223,7 +229,7 @@ async function toggleFullscreen() {
 }
 
 function renderStatus(status) {
-  const { camera, feed, system, warnings } = status;
+  const { camera, feed, integrations, system, warnings } = status;
   document.title = status.title;
   elements.appTitle.textContent = status.title;
   elements.appVersion.textContent = `v${status.version}`;
@@ -265,6 +271,10 @@ function renderStatus(status) {
   elements.systemValue.textContent = system.temperature_c == null ? system.hostname : `${system.temperature_c} C`;
   elements.systemDetail.textContent = formatDuration(system.uptime_seconds);
 
+  if (!viewState.webhookBusy) {
+    renderWebhookIntegration(integrations?.home_assistant || { configured: false });
+  }
+
   if (feed.frame_timestamp) {
     const captured = new Date(feed.frame_timestamp * 1000);
     const age = feed.frame_age_seconds == null ? "" : ` / ${feed.frame_age_seconds.toFixed(1)}s old`;
@@ -284,6 +294,38 @@ function renderStatus(status) {
     showStreamNotice("Camera feed unavailable");
   } else if (viewState.streamLoaded && !viewState.paused) {
     hideStreamNotice();
+  }
+}
+
+function renderWebhookIntegration(integration, message = null) {
+  viewState.webhookIntegration = integration;
+  const configured = Boolean(integration.configured);
+  elements.webhookRow.dataset.state = configured ? "active" : "inactive";
+  elements.webhookState.textContent = configured ? "Configured" : "Off";
+  elements.webhookDetail.textContent = message || (configured ? "Motion event webhook enabled" : "Not configured");
+  elements.webhookTestButton.disabled = viewState.webhookBusy || !configured;
+  elements.webhookTestButton.textContent = viewState.webhookBusy ? "Sending" : "Send test";
+}
+
+async function sendWebhookTest() {
+  if (viewState.webhookBusy || !viewState.webhookIntegration?.configured) return;
+  viewState.webhookBusy = true;
+  renderWebhookIntegration(viewState.webhookIntegration, "Sending test event");
+  try {
+    const result = await requestJSON("/api/webhook/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    viewState.webhookBusy = false;
+    renderWebhookIntegration(
+      { configured: true },
+      `Test delivered / HTTP ${result.status_code}`,
+    );
+  } catch (error) {
+    viewState.webhookBusy = false;
+    renderWebhookIntegration(viewState.webhookIntegration, error.message);
+    elements.webhookRow.dataset.state = "failed";
   }
 }
 
@@ -1046,6 +1088,7 @@ elements.maskCanvas.addEventListener("pointerdown", beginMaskPointer);
 elements.maskCanvas.addEventListener("pointermove", moveMaskPointer);
 elements.maskCanvas.addEventListener("pointerup", finishMaskPointer);
 elements.maskCanvas.addEventListener("pointercancel", cancelMaskPointer);
+elements.webhookTestButton.addEventListener("click", sendWebhookTest);
 eventRangeButtons.forEach((button) => {
   button.addEventListener("click", () => selectEventWindow(button.dataset.eventWindow));
 });

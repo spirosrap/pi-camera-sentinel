@@ -13,13 +13,13 @@
 - filterable event history with archive totals and pagination
 - timezone-aware Telegram quiet hours with dashboard controls
 - masked zones for motion detection with dashboard editor
+- optional Home Assistant webhook output
 - camera tuning profiles
 - exposure watchdog for black/washed-out frames
 - systemd installer
 
 ## Good Next Features
 
-- optional Home Assistant webhook output
 - alert batching
 
 ## Non-Goals For Now

@@ -83,6 +83,8 @@ class Settings:
     policy_file: Path
     mask_file: Path
     timezone: str
+    webhook_url: str
+    webhook_timeout: float
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -146,6 +148,12 @@ class Settings:
             policy_file=policy_file,
             mask_file=mask_file,
             timezone=env_str("SENTINEL_TIMEZONE", "local", "MOTION_TIMEZONE"),
+            webhook_url=env_str(
+                "SENTINEL_HOME_ASSISTANT_WEBHOOK_URL",
+                "",
+                "SENTINEL_WEBHOOK_URL",
+            ),
+            webhook_timeout=env_float("SENTINEL_WEBHOOK_TIMEOUT", 5.0),
         )
 
     def missing_telegram_fields(self) -> list[str]:

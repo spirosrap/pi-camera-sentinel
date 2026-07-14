@@ -12,6 +12,7 @@ This project is intentionally small: no cloud camera account, no public port for
 - Watches snapshots for motion using frame differencing.
 - Supports dashboard-drawn ignored areas for excluding noisy motion zones.
 - Sends Telegram photo alerts on motion.
+- Can emit Home Assistant-compatible JSON webhooks for motion automations.
 - Supports timezone-aware Telegram quiet hours while continuing to archive motion.
 - Can attach short video clips if enabled.
 - Provides camera profiles for common USB webcam exposure issues.
@@ -116,12 +117,13 @@ The `pi-camera-sentinel serve` command provides a small same-origin web app on p
 - current frame age, resolution, dropped-frame count, and exposure level
 - camera, power, temperature, uptime, and storage status
 - motion-alert and exposure-recovery state with pause and resume toggles
+- secret-safe Home Assistant webhook state and test delivery
 - quiet-hours schedule controls for Telegram notifications
 - a pointer- and touch-friendly editor for ignored motion areas
 - camera profiles plus safe manual exposure, color, gain, sharpness, and white-balance controls
 - retained motion snapshots with 24-hour, 7-day, and all-time filters
 - archive totals and paginated access to older captures
-- `/healthz`, `/api/status`, `/api/camera`, `/api/policy`, and `/api/masks` endpoints for monitoring and control
+- `/healthz`, `/api/status`, `/api/camera`, `/api/policy`, `/api/masks`, and `/api/webhook/test` endpoints for monitoring and control
 
 The event API at `/api/events` accepts a validated `window` (`24h`, `7d`, or `all`), a page `limit`, and an optional `before` cursor. Responses include retained-file counts and storage totals as well as the current page.
 
@@ -134,6 +136,23 @@ The dashboard controls the service names in `SENTINEL_MOTION_SERVICE` and `SENTI
 Quiet hours are stored atomically in `SENTINEL_POLICY_FILE`. Set `SENTINEL_TIMEZONE` to an IANA timezone such as `Europe/Athens` when the schedule should not follow the Pi's system timezone. Motion captures remain in the archive during quiet hours; only Telegram delivery is suppressed.
 
 Motion masks are stored atomically in `SENTINEL_MASK_FILE`, which defaults to `motion-masks.json` beside the alert policy. The dashboard supports up to eight normalized rectangles. Masked areas remain visible in the feed and saved captures; they are excluded only from motion detection. The running monitor reloads changes within five seconds.
+
+## Home Assistant Webhook
+
+Create a webhook-triggered Home Assistant automation and put its full URL in the private environment file:
+
+```text
+SENTINEL_HOME_ASSISTANT_WEBHOOK_URL=http://homeassistant.local:8123/api/webhook/your-secret-id
+SENTINEL_WEBHOOK_TIMEOUT=5
+```
+
+Restart the motion and dashboard services, then use the dashboard's **Send test** action or run:
+
+```bash
+sudo pi-camera-sentinel send-webhook-test
+```
+
+Motion events include the camera name, Pi hostname, timestamp, changed-pixel ratio, capture filename, feed URL, and event URL. Webhooks are sent during Telegram quiet hours because the schedule suppresses Telegram delivery only. Delivery failures are logged but do not block Telegram alerts or capture retention. See [docs/home-assistant.md](docs/home-assistant.md).
 
 ## Camera Tuning
 
@@ -189,6 +208,7 @@ Use **Motion zones** in the dashboard to exclude areas such as moving plants, re
 - Do not expose the camera port publicly.
 - Prefer Tailscale, VPN, or LAN-only access.
 - Telegram bot tokens control your bot; treat them like passwords.
+- Home Assistant webhook URLs contain secret IDs; do not commit or expose them.
 
 ## Development
 

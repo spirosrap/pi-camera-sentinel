@@ -27,6 +27,7 @@ from .health import disk_status, recent_undervoltage_seen
 from .masks import MAX_MOTION_MASKS, load_motion_masks, save_motion_masks, validate_motion_masks
 from .policy import AlertPolicy, load_alert_policy, save_alert_policy
 from .services import service_state, set_service_active
+from .webhook import deliver_webhook, webhook_payload
 
 
 LOG = logging.getLogger("pi-camera-sentinel.dashboard")
@@ -166,6 +167,11 @@ def collect_dashboard_status(
             "disk_total_bytes": disk_total_bytes,
             "disk_free_percent": round((disk_free_bytes / disk_total_bytes) * 100, 1),
             "disk_low": disk_low,
+        },
+        "integrations": {
+            "home_assistant": {
+                "configured": bool(settings.webhook_url),
+            }
         },
         "warnings": warnings,
     }
@@ -365,6 +371,21 @@ class DashboardApplication:
                 "max_regions": MAX_MOTION_MASKS,
             }
 
+    def send_webhook_test(self) -> dict[str, object]:
+        status_code = deliver_webhook(
+            self.settings,
+            webhook_payload(
+                self.settings,
+                event="test",
+                captured_at=dt.datetime.now().astimezone(),
+            ),
+        )
+        return {
+            "configured": True,
+            "delivered": True,
+            "status_code": status_code,
+        }
+
     def services(self) -> dict[str, dict[str, object]]:
         with self._service_lock:
             return {
@@ -513,6 +534,8 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             self.run_policy_action(lambda: self.app.update_alert_policy(payload))
         elif path == "/api/masks":
             self.run_motion_masks_action(lambda: self.app.update_motion_masks(payload))
+        elif path == "/api/webhook/test":
+            self.run_webhook_action(self.app.send_webhook_test)
         elif path.startswith("/api/services/"):
             service_id = path.removeprefix("/api/services/")
             active = payload.get("active")
@@ -593,6 +616,15 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         except OSError as exc:
             LOG.warning("motion mask write failed: %s", exc)
             self.send_json({"error": "motion masks are unavailable"}, HTTPStatus.SERVICE_UNAVAILABLE)
+
+    def run_webhook_action(self, action: Callable[[], dict[str, object]]) -> None:
+        try:
+            self.send_json(action())
+        except ValueError as exc:
+            self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+        except requests.RequestException as exc:
+            LOG.warning("Home Assistant webhook test failed: %s", exc)
+            self.send_json({"error": "Home Assistant webhook delivery failed"}, HTTPStatus.BAD_GATEWAY)
 
     def serve_static(self, name: str) -> None:
         target = (STATIC_DIR / name).resolve()
