@@ -112,10 +112,13 @@ The `pi-camera-sentinel serve` command provides a small same-origin web app on p
 - live, pause, reconnect, snapshot, and fullscreen controls
 - current frame age, resolution, dropped-frame count, and exposure level
 - camera, power, temperature, uptime, and storage status
+- camera profiles plus safe manual exposure, color, gain, sharpness, and white-balance controls
 - the most recent retained motion snapshots
-- `/healthz` and `/api/status` endpoints for monitoring
+- `/healthz`, `/api/status`, and `/api/camera` endpoints for monitoring and control
 
 The server proxies `/stream` and `/snapshot` to `ustreamer`, which keeps the raw camera port private when Tailscale Serve points at the dashboard.
+
+Camera writes accept only known V4L2 controls and integer values inside the device-reported range. Browser writes also require a same-origin JSON request. The dashboard deliberately caps manual gain at `128` and exposure at `250` to avoid the extreme settings that can wash a C920 frame completely white.
 
 ## Camera Tuning
 

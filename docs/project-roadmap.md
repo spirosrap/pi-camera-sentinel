@@ -8,6 +8,7 @@
 - health check command
 - low-disk-space health check
 - private web dashboard and same-origin stream proxy
+- dashboard camera profile and manual tuning controls
 - camera tuning profiles
 - exposure watchdog for black/washed-out frames
 - systemd installer
@@ -19,7 +20,7 @@
 - quiet hours
 - alert batching
 - event metadata and alert history
-- dashboard camera profile controls
+- dashboard watchdog state and pause controls
 
 ## Non-Goals For Now
 

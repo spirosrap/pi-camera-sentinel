@@ -6,8 +6,8 @@
     <meta name="theme-color" content="#171a18">
     <meta name="color-scheme" content="light">
     <title>Pi Camera Sentinel</title>
-    <link rel="stylesheet" href="/assets/styles.css">
-    <script src="/assets/app.js" defer></script>
+    <link rel="stylesheet" href="/assets/styles.css?v=0.3.0">
+    <script src="/assets/app.js?v=0.3.0" defer></script>
   </head>
   <body>
     <header class="topbar">
@@ -87,6 +87,78 @@
           <strong id="system-value">--</strong>
           <span class="metric-detail" id="system-detail">--</span>
         </article>
+      </section>
+
+      <section class="tuning-section" aria-labelledby="tuning-heading">
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">Device controls</p>
+            <h2 id="tuning-heading">Camera tuning</h2>
+          </div>
+          <button type="button" id="camera-refresh-button">Refresh controls</button>
+        </div>
+
+        <div class="tuning-surface">
+          <div class="preset-row">
+            <span class="control-name">Profile</span>
+            <div class="segmented-control" id="profile-controls" role="group" aria-label="Camera profile">
+              <button type="button" data-profile="auto" aria-pressed="false">Auto</button>
+              <button type="button" data-profile="outdoor-shade" aria-pressed="false">Outdoor shade</button>
+              <button type="button" data-profile="low-light" aria-pressed="false">Low light</button>
+            </div>
+          </div>
+
+          <form id="tuning-form">
+            <div class="toggle-row">
+              <label class="toggle-control">
+                <input type="checkbox" id="auto-exposure-toggle" data-control="auto_exposure" disabled>
+                <span class="toggle-track" aria-hidden="true"></span>
+                <span>Auto exposure</span>
+              </label>
+              <label class="toggle-control">
+                <input type="checkbox" id="auto-white-balance-toggle" data-control="white_balance_automatic" disabled>
+                <span class="toggle-track" aria-hidden="true"></span>
+                <span>Auto white balance</span>
+              </label>
+            </div>
+
+            <div class="slider-grid">
+              <label class="range-control">
+                <span><strong>Brightness</strong><output data-output="brightness">--</output></span>
+                <input type="range" data-control="brightness" min="0" max="255" step="1" disabled>
+              </label>
+              <label class="range-control">
+                <span><strong>Contrast</strong><output data-output="contrast">--</output></span>
+                <input type="range" data-control="contrast" min="0" max="255" step="1" disabled>
+              </label>
+              <label class="range-control">
+                <span><strong>Saturation</strong><output data-output="saturation">--</output></span>
+                <input type="range" data-control="saturation" min="0" max="255" step="1" disabled>
+              </label>
+              <label class="range-control">
+                <span><strong>Gain</strong><output data-output="gain">--</output></span>
+                <input type="range" data-control="gain" min="0" max="128" step="1" disabled>
+              </label>
+              <label class="range-control">
+                <span><strong>Sharpness</strong><output data-output="sharpness">--</output></span>
+                <input type="range" data-control="sharpness" min="0" max="255" step="1" disabled>
+              </label>
+              <label class="range-control">
+                <span><strong>Exposure</strong><output data-output="exposure_time_absolute">--</output></span>
+                <input type="range" data-control="exposure_time_absolute" min="3" max="250" step="1" disabled>
+              </label>
+              <label class="range-control">
+                <span><strong>White balance</strong><output data-output="white_balance_temperature">--</output></span>
+                <input type="range" data-control="white_balance_temperature" min="2000" max="6500" step="1" disabled>
+              </label>
+            </div>
+
+            <div class="tuning-foot">
+              <p id="camera-control-message" role="status" aria-live="polite">Reading camera controls</p>
+              <button type="submit" id="camera-apply-button" disabled>Apply changes</button>
+            </div>
+          </form>
+        </div>
       </section>
 
       <section class="events-section" aria-labelledby="events-heading">

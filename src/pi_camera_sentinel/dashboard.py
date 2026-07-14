@@ -6,7 +6,9 @@ import json
 import logging
 import mimetypes
 import socket
+import subprocess
 import sys
+import threading
 import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -18,6 +20,7 @@ import requests
 from PIL import Image, ImageStat
 
 from . import __version__
+from .camera import apply_profile, camera_state, set_controls
 from .config import Settings
 from .health import disk_status, recent_undervoltage_seen
 
@@ -185,6 +188,17 @@ def with_query(url: str, query: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc, parts.path, combined, parts.fragment))
 
 
+def same_origin(origin: str | None, host: str | None) -> bool:
+    if not origin:
+        return True
+    if not host or origin == "null":
+        return False
+    try:
+        return urlsplit(origin).netloc.lower() == host.lower()
+    except ValueError:
+        return False
+
+
 class DashboardApplication:
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -192,6 +206,7 @@ class DashboardApplication:
         self._status_at = 0.0
         self._undervoltage: bool | None = None
         self._undervoltage_at = 0.0
+        self._camera_lock = threading.RLock()
 
     def status(self) -> dict:
         now = time.monotonic()
@@ -209,6 +224,19 @@ class DashboardApplication:
 
     def events(self) -> list[dict[str, object]]:
         return list_recent_events(self.settings.output_dir)
+
+    def camera(self) -> dict[str, object]:
+        with self._camera_lock:
+            return camera_state(self.settings.camera_device)
+
+    def apply_camera_profile(self, profile: str) -> dict[str, object]:
+        with self._camera_lock:
+            apply_profile(self.settings.camera_device, profile)
+            return camera_state(self.settings.camera_device)
+
+    def update_camera_controls(self, values: dict[str, int]) -> dict[str, object]:
+        with self._camera_lock:
+            return set_controls(self.settings.camera_device, values)
 
 
 class DashboardHTTPServer(ThreadingHTTPServer):
@@ -286,6 +314,8 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             self.send_json(self.app.status())
         elif path == "/api/events":
             self.send_json({"events": self.app.events()})
+        elif path == "/api/camera":
+            self.send_camera_state()
         elif path == "/healthz":
             payload = self.app.status()
             status = HTTPStatus.OK if payload["ok"] else HTTPStatus.SERVICE_UNAVAILABLE
@@ -299,6 +329,62 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             self.serve_event(unquote(path.removeprefix("/events/")))
         else:
             self.send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+
+    def do_POST(self) -> None:
+        if not same_origin(self.headers.get("Origin"), self.headers.get("Host")):
+            self.send_json({"error": "cross-origin camera changes are not allowed"}, HTTPStatus.FORBIDDEN)
+            return
+        try:
+            payload = self.read_json_body()
+        except ValueError as exc:
+            self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+            return
+
+        path = urlsplit(self.path).path
+        if path == "/api/camera/profile":
+            profile = payload.get("profile")
+            if not isinstance(profile, str):
+                self.send_json({"error": "profile must be a string"}, HTTPStatus.BAD_REQUEST)
+                return
+            self.run_camera_action(lambda: self.app.apply_camera_profile(profile))
+        elif path == "/api/camera/controls":
+            controls = payload.get("controls")
+            if not isinstance(controls, dict):
+                self.send_json({"error": "controls must be an object"}, HTTPStatus.BAD_REQUEST)
+                return
+            self.run_camera_action(lambda: self.app.update_camera_controls(controls))
+        else:
+            self.send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+
+    def read_json_body(self) -> dict:
+        content_type = self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+        if content_type != "application/json":
+            raise ValueError("request content type must be application/json")
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError as exc:
+            raise ValueError("invalid content length") from exc
+        if length <= 0 or length > 8192:
+            raise ValueError("request body must be between 1 and 8192 bytes")
+        try:
+            payload = json.loads(self.rfile.read(length))
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise ValueError("request body must be valid JSON") from exc
+        if not isinstance(payload, dict):
+            raise ValueError("request body must be a JSON object")
+        return payload
+
+    def send_camera_state(self) -> None:
+        self.run_camera_action(self.app.camera)
+
+    def run_camera_action(self, action: Callable[[], dict[str, object]]) -> None:
+        try:
+            self.send_json(action())
+        except ValueError as exc:
+            self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+        except (OSError, subprocess.SubprocessError) as exc:
+            LOG.warning("camera control action failed: %s", exc)
+            self.send_json({"error": "camera controls are unavailable"}, HTTPStatus.SERVICE_UNAVAILABLE)
 
     def serve_static(self, name: str) -> None:
         target = (STATIC_DIR / name).resolve()

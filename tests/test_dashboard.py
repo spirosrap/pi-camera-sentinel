@@ -6,7 +6,7 @@ import requests
 from PIL import Image
 
 from pi_camera_sentinel.config import Settings
-from pi_camera_sentinel.dashboard import collect_dashboard_status, list_recent_events, with_query
+from pi_camera_sentinel.dashboard import collect_dashboard_status, list_recent_events, same_origin, with_query
 
 
 class FakeResponse:
@@ -111,3 +111,10 @@ def test_with_query_preserves_existing_upstream_query():
     assert with_query("http://127.0.0.1:8080/stream?key=camera", "advance_headers=1") == (
         "http://127.0.0.1:8080/stream?key=camera&advance_headers=1"
     )
+
+
+def test_same_origin_allows_direct_and_matching_requests():
+    assert same_origin(None, "camera.example") is True
+    assert same_origin("https://camera.example", "camera.example") is True
+    assert same_origin("https://other.example", "camera.example") is False
+    assert same_origin("null", "camera.example") is False

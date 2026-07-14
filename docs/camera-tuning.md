@@ -9,6 +9,10 @@ pi-camera-sentinel camera-controls
 pi-camera-sentinel camera-get
 ```
 
+The private dashboard also reads these controls directly. Open **Camera tuning** to apply a profile or adjust brightness, contrast, saturation, gain, sharpness, exposure, and white balance. Only changed sliders are submitted.
+
+Automatic exposure disables the manual exposure slider. Automatic white balance disables the temperature slider. The dashboard caps manual gain and exposure below the C920's extreme range, while the CLI remains available for deliberate low-level work.
+
 ## Profiles
 
 `auto` restores simple automatic behavior:
@@ -73,6 +77,8 @@ SENTINEL_EXPOSURE_BRIGHT_MEAN_MIN=230
 The bundled C920 low-light profile is intentionally moderate (`exposure=20`, `gain=20`). Extreme manual exposure and gain values can turn a recovering camera frame completely white.
 
 This is more reliable than switching by clock time because it responds to the actual image: clouds, shade, outdoor lights, or a camera pointed at a bright bowl can all confuse fixed schedules.
+
+The watchdog can change exposure controls after a dashboard adjustment when the image crosses its configured dark or bright thresholds. The dashboard refreshes its displayed values every minute when there are no unsaved edits.
 
 ## Power And USB Problems
 

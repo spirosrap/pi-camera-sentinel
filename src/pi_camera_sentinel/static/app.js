@@ -2,6 +2,11 @@
 
 const elements = {
   appTitle: document.querySelector("#app-title"),
+  autoExposureToggle: document.querySelector("#auto-exposure-toggle"),
+  autoWhiteBalanceToggle: document.querySelector("#auto-white-balance-toggle"),
+  cameraApplyButton: document.querySelector("#camera-apply-button"),
+  cameraControlMessage: document.querySelector("#camera-control-message"),
+  cameraRefreshButton: document.querySelector("#camera-refresh-button"),
   cameraSource: document.querySelector("#camera-source"),
   captureDialog: document.querySelector("#capture-dialog"),
   captureImage: document.querySelector("#capture-image"),
@@ -26,6 +31,7 @@ const elements = {
   pauseButton: document.querySelector("#pause-button"),
   powerDetail: document.querySelector("#power-detail"),
   powerValue: document.querySelector("#power-value"),
+  profileControls: document.querySelector("#profile-controls"),
   reconnectButton: document.querySelector("#reconnect-button"),
   snapshotButton: document.querySelector("#snapshot-button"),
   storageDetail: document.querySelector("#storage-detail"),
@@ -35,14 +41,22 @@ const elements = {
   streamShell: document.querySelector("#stream-shell"),
   systemDetail: document.querySelector("#system-detail"),
   systemValue: document.querySelector("#system-value"),
+  tuningForm: document.querySelector("#tuning-form"),
   warningBanner: document.querySelector("#warning-banner"),
   warningCopy: document.querySelector("#warning-copy"),
 };
 
 const viewState = {
+  cameraBusy: false,
+  cameraState: null,
+  dirtyControls: new Set(),
   paused: false,
   streamLoaded: false,
 };
+
+const rangeInputs = [...document.querySelectorAll('.range-control input[type="range"]')];
+const controlInputs = [...document.querySelectorAll("[data-control]")];
+const profileButtons = [...elements.profileControls.querySelectorAll("[data-profile]")];
 
 const dateTime = new Intl.DateTimeFormat(undefined, {
   dateStyle: "medium",
@@ -224,6 +238,175 @@ async function refreshStatus() {
   }
 }
 
+function setCameraMessage(message, state = "idle") {
+  elements.cameraControlMessage.textContent = message;
+  elements.cameraControlMessage.dataset.state = state;
+}
+
+function setCameraBusy(busy) {
+  viewState.cameraBusy = busy;
+  elements.cameraRefreshButton.disabled = busy;
+  profileButtons.forEach((button) => {
+    button.disabled = busy;
+  });
+  updateDependentControls();
+}
+
+function updateApplyButton() {
+  elements.cameraApplyButton.disabled = viewState.cameraBusy || viewState.dirtyControls.size === 0;
+}
+
+function updateRangeOutput(input) {
+  const output = document.querySelector(`[data-output="${input.dataset.control}"]`);
+  if (output) output.value = input.value;
+}
+
+function updateDependentControls() {
+  const autoExposure = elements.autoExposureToggle.checked;
+  const autoWhiteBalance = elements.autoWhiteBalanceToggle.checked;
+
+  controlInputs.forEach((input) => {
+    const name = input.dataset.control;
+    const control = viewState.cameraState?.controls?.[name];
+    let disabled = viewState.cameraBusy || !control;
+    if (name === "exposure_time_absolute") disabled ||= autoExposure;
+    else if (name === "white_balance_temperature") disabled ||= autoWhiteBalance;
+    else if (input.type !== "checkbox") disabled ||= control?.inactive;
+    input.disabled = disabled;
+  });
+  if (autoExposure) viewState.dirtyControls.delete("exposure_time_absolute");
+  if (autoWhiteBalance) viewState.dirtyControls.delete("white_balance_temperature");
+  updateApplyButton();
+}
+
+function markControlDirty(input) {
+  const name = input.dataset.control;
+  const value = input.type === "checkbox" ? (input.checked ? input.dataset.onValue : input.dataset.offValue) : input.value;
+  if (String(value) === input.dataset.originalValue) {
+    viewState.dirtyControls.delete(name);
+  } else {
+    viewState.dirtyControls.add(name);
+  }
+  profileButtons.forEach((button) => {
+    const active = viewState.dirtyControls.size === 0 && button.dataset.profile === viewState.cameraState?.active_profile;
+    button.setAttribute("aria-pressed", String(active));
+  });
+  updateDependentControls();
+  setCameraMessage(viewState.dirtyControls.size ? `${viewState.dirtyControls.size} unsaved change${viewState.dirtyControls.size === 1 ? "" : "s"}` : "Controls up to date");
+}
+
+function renderCameraState(state, message = "Controls up to date") {
+  viewState.cameraState = state;
+  viewState.dirtyControls.clear();
+  const controls = state.controls || {};
+
+  profileButtons.forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.profile === state.active_profile));
+  });
+
+  controlInputs.forEach((input) => {
+    const control = controls[input.dataset.control];
+    if (!control) {
+      input.disabled = true;
+      return;
+    }
+    if (input.type === "checkbox") {
+      input.dataset.onValue = input.dataset.control === "auto_exposure" ? "3" : "1";
+      input.dataset.offValue = input.dataset.control === "auto_exposure" ? "1" : "0";
+      input.checked = String(control.value) === input.dataset.onValue;
+      input.dataset.originalValue = input.checked ? input.dataset.onValue : input.dataset.offValue;
+      input.disabled = false;
+      return;
+    }
+    input.min = control.ui_minimum;
+    input.max = control.ui_maximum;
+    input.step = control.step;
+    input.value = Math.min(Math.max(control.value, control.ui_minimum), control.ui_maximum);
+    input.dataset.originalValue = input.value;
+    input.disabled = control.inactive;
+    updateRangeOutput(input);
+  });
+
+  setCameraBusy(false);
+  updateDependentControls();
+  setCameraMessage(message, "success");
+}
+
+async function requestJSON(url, options = {}) {
+  const response = await fetch(url, { cache: "no-store", ...options });
+  let payload = {};
+  try {
+    payload = await response.json();
+  } catch (_error) {
+    payload = {};
+  }
+  if (!response.ok) throw new Error(payload.error || `Request failed: ${response.status}`);
+  return payload;
+}
+
+async function refreshCameraState(message = "Controls up to date", force = false) {
+  if (viewState.cameraBusy || (!force && viewState.dirtyControls.size)) return;
+  setCameraBusy(true);
+  setCameraMessage("Reading camera controls");
+  try {
+    renderCameraState(await requestJSON("/api/camera"), message);
+  } catch (error) {
+    viewState.cameraState = null;
+    controlInputs.forEach((input) => {
+      input.disabled = true;
+    });
+    setCameraBusy(false);
+    setCameraMessage(error.message, "error");
+  }
+}
+
+async function applyProfile(profile, label) {
+  setCameraBusy(true);
+  setCameraMessage(`Applying ${label}`);
+  try {
+    const state = await requestJSON("/api/camera/profile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ profile }),
+    });
+    renderCameraState(state, `${label} profile applied`);
+    await refreshStatus();
+  } catch (error) {
+    setCameraBusy(false);
+    setCameraMessage(error.message, "error");
+  }
+}
+
+async function applyManualControls(event) {
+  event.preventDefault();
+  const controls = {};
+  controlInputs.forEach((input) => {
+    const name = input.dataset.control;
+    if (!viewState.dirtyControls.has(name)) return;
+    if (name === "exposure_time_absolute" && elements.autoExposureToggle.checked) return;
+    if (name === "white_balance_temperature" && elements.autoWhiteBalanceToggle.checked) return;
+    const value = input.type === "checkbox" ? (input.checked ? input.dataset.onValue : input.dataset.offValue) : input.value;
+    controls[name] = Number(value);
+  });
+  if (!Object.keys(controls).length) return;
+
+  setCameraBusy(true);
+  setCameraMessage("Applying camera controls");
+  try {
+    const state = await requestJSON("/api/camera/controls", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ controls }),
+    });
+    renderCameraState(state, "Manual controls applied");
+    await refreshStatus();
+  } catch (error) {
+    setCameraBusy(false);
+    updateDependentControls();
+    setCameraMessage(error.message, "error");
+  }
+}
+
 function openCapture(event) {
   elements.captureImage.src = event.url;
   elements.captureTime.dateTime = event.captured_at;
@@ -289,6 +472,20 @@ elements.pauseButton.addEventListener("click", togglePause);
 elements.reconnectButton.addEventListener("click", startStream);
 elements.snapshotButton.addEventListener("click", saveSnapshot);
 elements.fullscreenButton.addEventListener("click", toggleFullscreen);
+elements.cameraRefreshButton.addEventListener("click", () => refreshCameraState("Controls refreshed", true));
+elements.tuningForm.addEventListener("submit", applyManualControls);
+profileButtons.forEach((button) => {
+  button.addEventListener("click", () => applyProfile(button.dataset.profile, button.textContent));
+});
+rangeInputs.forEach((input) => {
+  input.addEventListener("input", () => {
+    updateRangeOutput(input);
+    markControlDirty(input);
+  });
+});
+[elements.autoExposureToggle, elements.autoWhiteBalanceToggle].forEach((input) => {
+  input.addEventListener("change", () => markControlDirty(input));
+});
 elements.dialogClose.addEventListener("click", () => elements.captureDialog.close());
 elements.captureDialog.addEventListener("click", (event) => {
   if (event.target === elements.captureDialog) elements.captureDialog.close();
@@ -300,7 +497,9 @@ document.addEventListener("fullscreenchange", () => {
 startStream();
 refreshStatus();
 refreshEvents();
+refreshCameraState();
 updateClock();
 setInterval(refreshStatus, 10000);
 setInterval(refreshEvents, 30000);
+setInterval(refreshCameraState, 60000);
 setInterval(updateClock, 1000);

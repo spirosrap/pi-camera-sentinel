@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0 - 2026-07-14
+
+- Add camera profile controls to the private dashboard.
+- Add live sliders for brightness, contrast, saturation, gain, sharpness, exposure, and white balance.
+- Add automatic exposure and white-balance toggles with dependent-control handling.
+- Add allowlisted, range-validated camera control APIs with same-origin write protection.
+- Detect the active camera profile from current V4L2 values, including device rounding tolerance.
+- Cap dashboard gain and exposure controls below the C920's extreme white-frame range.
+
 ## 0.2.0 - 2026-07-14
 
 - Add a responsive private dashboard with live camera controls and recent motion captures.
