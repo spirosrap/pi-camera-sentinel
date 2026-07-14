@@ -98,6 +98,7 @@ const viewState = {
   policyBusy: false,
   policyDirty: false,
   policyState: null,
+  recoveryState: null,
   serviceBusy: new Set(),
   serviceStates: {},
   streamLoaded: false,
@@ -111,6 +112,12 @@ const serviceElements = {
     row: document.querySelector("#motion-service-row"),
     state: document.querySelector("#motion-service-state"),
     toggle: document.querySelector("#motion-service-toggle"),
+  },
+  recovery: {
+    detail: document.querySelector("#recovery-service-detail"),
+    row: document.querySelector("#recovery-service-row"),
+    state: document.querySelector("#recovery-service-state"),
+    toggle: document.querySelector("#recovery-service-toggle"),
   },
   watchdog: {
     detail: document.querySelector("#watchdog-service-detail"),
@@ -275,6 +282,7 @@ function renderStatus(status) {
   elements.systemDetail.textContent = formatDuration(system.uptime_seconds);
 
   renderAlertBatching(automation?.alert_batching || { enabled: false });
+  renderFeedRecovery(automation?.feed_recovery || null);
 
   if (!viewState.webhookBusy) {
     renderWebhookIntegration(integrations?.home_assistant || { configured: false });
@@ -312,6 +320,32 @@ function renderAlertBatching(batching) {
     elements.alertBatchDetail.textContent = `${windowLabel}s window / up to ${batching.max_photos} photos`;
   } else {
     elements.alertBatchDetail.textContent = "Immediate single alerts";
+  }
+}
+
+function recoveryDetail(recovery) {
+  if (!recovery?.state) return "Waiting for recovery status";
+  const state = recovery.state;
+  const restarts = Number(state.restart_count) || 0;
+  const restartLabel = restarts === 1 ? "1 recovery" : `${restarts} recoveries`;
+  if (state.status === "healthy") return `Healthy / ${restartLabel}`;
+  if (state.status === "failing") {
+    return `${state.consecutive_failures}/${recovery.failure_threshold} failed checks / ${state.last_reason}`;
+  }
+  if (state.status === "restarted") {
+    const when = state.last_restart_at ? formatRelative(state.last_restart_at) : "recently";
+    return `Stream restarted ${when} / ${restartLabel}`;
+  }
+  if (state.status === "cooldown") return `Restart cooldown / ${state.last_reason}`;
+  if (state.status === "failed") return `Restart failed / ${state.last_reason}`;
+  if (state.status === "unavailable") return state.last_reason || "Recovery state unavailable";
+  return `Waiting for first check / ${recovery.failure_threshold} failures required`;
+}
+
+function renderFeedRecovery(recovery) {
+  viewState.recoveryState = recovery;
+  if (viewState.serviceStates.recovery) {
+    renderService("recovery", viewState.serviceStates.recovery);
   }
 }
 
@@ -371,9 +405,13 @@ function renderService(serviceId, state) {
   viewState.serviceStates[serviceId] = state;
   target.row.dataset.state = state.state;
   target.state.textContent = labels[state.state] || "Unknown";
-  target.detail.textContent = state.available
-    ? `${state.name} / ${state.sub_state}`
-    : state.error || "System state unavailable";
+  if (serviceId === "recovery" && state.available && state.active) {
+    target.detail.textContent = recoveryDetail(viewState.recoveryState);
+  } else {
+    target.detail.textContent = state.available
+      ? `${state.name} / ${state.sub_state}`
+      : state.error || "System state unavailable";
+  }
   target.toggle.checked = Boolean(state.active);
   target.toggle.disabled = viewState.serviceBusy.has(serviceId) || !state.available;
   target.toggle.setAttribute("aria-busy", String(viewState.serviceBusy.has(serviceId)));
@@ -381,9 +419,10 @@ function renderService(serviceId, state) {
 
 function renderServices(services) {
   Object.entries(services).forEach(([serviceId, state]) => renderService(serviceId, state));
+  const total = Object.keys(serviceElements).length;
   const available = Object.values(services).filter((state) => state.available).length;
   const active = Object.values(services).filter((state) => state.active).length;
-  elements.servicesMeta.textContent = available === 2 ? `${active} of 2 active` : "Service issue";
+  elements.servicesMeta.textContent = available === total ? `${active} of ${total} active` : "Service issue";
 }
 
 async function refreshServices() {

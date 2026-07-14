@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.0 - 2026-07-14
+
+- Add an automatic watchdog for unavailable, offline, empty, or stale camera snapshots.
+- Require repeated failed checks and enforce a restart cooldown to prevent loops.
+- Persist recovery health, failure counts, restart totals, and timestamps atomically.
+- Add one-shot and continuous recovery CLI commands.
+- Add a dedicated systemd service and installer support.
+- Show feed-recovery health and a pause control in the private dashboard.
+- Validate the configured stream service before any systemd restart.
+
 ## 0.9.0 - 2026-07-14
 
 - Group nearby motion detections into one Telegram media album.

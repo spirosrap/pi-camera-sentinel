@@ -18,6 +18,7 @@ This project is intentionally small: no cloud camera account, no public port for
 - Can attach short video clips if enabled.
 - Provides camera profiles for common USB webcam exposure issues.
 - Can automatically switch between day and low-light exposure profiles.
+- Automatically restarts an unavailable or stale feed after repeated failed checks.
 - Includes health checks for feed availability and Pi undervoltage warnings.
 - Reports low storage, CPU temperature, frame freshness, and camera availability.
 - Shows live motion-alert and exposure-watchdog service state with pause and resume controls.
@@ -69,6 +70,12 @@ Enable automatic exposure recovery:
 sudo systemctl enable --now pi-camera-exposure-watchdog.service
 ```
 
+Enable automatic feed recovery:
+
+```bash
+sudo systemctl enable --now pi-camera-recovery-watchdog.service
+```
+
 Open the local dashboard:
 
 ```text
@@ -118,6 +125,7 @@ The `pi-camera-sentinel serve` command provides a small same-origin web app on p
 - current frame age, resolution, dropped-frame count, and exposure level
 - camera, power, temperature, uptime, and storage status
 - motion-alert and exposure-recovery state with pause and resume toggles
+- feed-recovery state, restart history, and pause control
 - active Telegram alert-batching window and photo limit
 - secret-safe Home Assistant webhook state and test delivery
 - quiet-hours schedule controls for Telegram notifications
@@ -133,7 +141,23 @@ The server proxies `/stream` and `/snapshot` to `ustreamer`, which keeps the raw
 
 Camera writes accept only known V4L2 controls and integer values inside the device-reported range. Browser writes also require a same-origin JSON request. The dashboard deliberately caps manual gain at `128` and exposure at `250` to avoid the extreme settings that can wash a C920 frame completely white.
 
-The dashboard controls the service names in `SENTINEL_MOTION_SERVICE` and `SENTINEL_EXPOSURE_SERVICE`. The defaults match the included systemd units; installations with custom unit names can override them in `/etc/pi-camera-sentinel.env`.
+The dashboard controls the service names in `SENTINEL_MOTION_SERVICE`, `SENTINEL_EXPOSURE_SERVICE`, and `SENTINEL_RECOVERY_SERVICE`. The defaults match the included systemd units; installations with custom unit names can override them in `/etc/pi-camera-sentinel.env`.
+
+## Automatic Feed Recovery
+
+The recovery watchdog checks the snapshot endpoint every 15 seconds. It restarts the configured stream service only after three consecutive failures, then waits at least two minutes before another restart:
+
+```text
+SENTINEL_STREAM_SERVICE=pi-camera-stream.service
+SENTINEL_RECOVERY_INTERVAL_SECONDS=15
+SENTINEL_RECOVERY_FAILURE_THRESHOLD=3
+SENTINEL_RECOVERY_STALE_SECONDS=20
+SENTINEL_RECOVERY_COOLDOWN_SECONDS=120
+```
+
+A failed HTTP request, non-image or empty response, explicit ustreamer offline signal, or frame timestamp older than the stale limit counts as a failure. Identical pixels do not count as stale, so a still scene cannot cause a restart loop. Recovery state and restart totals are stored atomically in `SENTINEL_RECOVERY_STATE_FILE` and displayed in the dashboard.
+
+Run one check manually with `pi-camera-sentinel recovery-step --json`. See [docs/recovery.md](docs/recovery.md).
 
 Quiet hours are stored atomically in `SENTINEL_POLICY_FILE`. Set `SENTINEL_TIMEZONE` to an IANA timezone such as `Europe/Athens` when the schedule should not follow the Pi's system timezone. Motion captures remain in the archive during quiet hours; only Telegram delivery is suppressed.
 

@@ -82,6 +82,13 @@ class Settings:
     dashboard_status_cache_seconds: float
     motion_service: str
     exposure_service: str
+    recovery_service: str
+    stream_service: str
+    recovery_state_file: Path
+    recovery_interval_seconds: float
+    recovery_failure_threshold: int
+    recovery_stale_seconds: float
+    recovery_cooldown_seconds: float
     policy_file: Path
     mask_file: Path
     timezone: str
@@ -149,6 +156,21 @@ class Settings:
                 "SENTINEL_EXPOSURE_SERVICE",
                 "pi-camera-exposure-watchdog.service",
             ),
+            recovery_service=env_str(
+                "SENTINEL_RECOVERY_SERVICE",
+                "pi-camera-recovery-watchdog.service",
+            ),
+            stream_service=env_str("SENTINEL_STREAM_SERVICE", "pi-camera-stream.service"),
+            recovery_state_file=Path(
+                env_str(
+                    "SENTINEL_RECOVERY_STATE_FILE",
+                    "/var/lib/pi-camera-sentinel/recovery-state.json",
+                )
+            ),
+            recovery_interval_seconds=env_float("SENTINEL_RECOVERY_INTERVAL_SECONDS", 15.0),
+            recovery_failure_threshold=env_int("SENTINEL_RECOVERY_FAILURE_THRESHOLD", 3),
+            recovery_stale_seconds=env_float("SENTINEL_RECOVERY_STALE_SECONDS", 20.0),
+            recovery_cooldown_seconds=env_float("SENTINEL_RECOVERY_COOLDOWN_SECONDS", 120.0),
             policy_file=policy_file,
             mask_file=mask_file,
             timezone=env_str("SENTINEL_TIMEZONE", "local", "MOTION_TIMEZONE"),

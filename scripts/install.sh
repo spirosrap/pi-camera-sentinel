@@ -47,6 +47,7 @@ fi
 install -m 0644 "${PROJECT_ROOT}/systemd/pi-camera-stream.service" /etc/systemd/system/pi-camera-stream.service
 install -m 0644 "${PROJECT_ROOT}/systemd/pi-camera-motion.service" /etc/systemd/system/pi-camera-motion.service
 install -m 0644 "${PROJECT_ROOT}/systemd/pi-camera-exposure-watchdog.service" /etc/systemd/system/pi-camera-exposure-watchdog.service
+install -m 0644 "${PROJECT_ROOT}/systemd/pi-camera-recovery-watchdog.service" /etc/systemd/system/pi-camera-recovery-watchdog.service
 install -m 0644 "${PROJECT_ROOT}/systemd/pi-camera-dashboard.service" /etc/systemd/system/pi-camera-dashboard.service
 systemctl daemon-reload
 
@@ -56,6 +57,7 @@ echo "Next:"
 echo "  sudoedit ${ENV_FILE}"
 echo "  sudo systemctl enable --now pi-camera-stream.service"
 echo "  pi-camera-sentinel healthcheck"
+echo "  sudo systemctl enable --now pi-camera-recovery-watchdog.service"
 echo "  sudo systemctl enable --now pi-camera-exposure-watchdog.service"
 echo "  sudo systemctl enable --now pi-camera-motion.service"
 echo "  sudo systemctl enable --now pi-camera-dashboard.service"

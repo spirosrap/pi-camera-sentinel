@@ -46,3 +46,23 @@ def test_alert_batch_configuration(monkeypatch):
 
     assert settings.alert_batch_seconds == 12.5
     assert settings.alert_batch_max_photos == 6
+
+
+def test_feed_recovery_configuration(monkeypatch, tmp_path):
+    monkeypatch.setenv("SENTINEL_STREAM_SERVICE", "custom-stream.service")
+    monkeypatch.setenv("SENTINEL_RECOVERY_SERVICE", "custom-recovery.service")
+    monkeypatch.setenv("SENTINEL_RECOVERY_STATE_FILE", str(tmp_path / "state.json"))
+    monkeypatch.setenv("SENTINEL_RECOVERY_INTERVAL_SECONDS", "12.5")
+    monkeypatch.setenv("SENTINEL_RECOVERY_FAILURE_THRESHOLD", "4")
+    monkeypatch.setenv("SENTINEL_RECOVERY_STALE_SECONDS", "30")
+    monkeypatch.setenv("SENTINEL_RECOVERY_COOLDOWN_SECONDS", "180")
+
+    settings = Settings.from_env()
+
+    assert settings.stream_service == "custom-stream.service"
+    assert settings.recovery_service == "custom-recovery.service"
+    assert settings.recovery_state_file == tmp_path / "state.json"
+    assert settings.recovery_interval_seconds == 12.5
+    assert settings.recovery_failure_threshold == 4
+    assert settings.recovery_stale_seconds == 30
+    assert settings.recovery_cooldown_seconds == 180

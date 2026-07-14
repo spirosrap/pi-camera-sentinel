@@ -110,3 +110,20 @@ def set_service_active(
     if result.returncode != 0:
         raise OSError(f"could not {action} systemd service")
     return service_state(name, runner=runner)
+
+
+def restart_service(name: str, *, runner: Runner = subprocess.run) -> None:
+    if not valid_service_name(name):
+        raise ValueError("invalid systemd service name")
+    try:
+        result = runner(
+            ["systemctl", "restart", name],
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise OSError("systemd service restart is unavailable") from exc
+    if result.returncode != 0:
+        raise OSError("could not restart systemd service")

@@ -2,7 +2,7 @@ import subprocess
 
 import pytest
 
-from pi_camera_sentinel.services import service_state, set_service_active, valid_service_name
+from pi_camera_sentinel.services import restart_service, service_state, set_service_active, valid_service_name
 
 
 class FakeRunner:
@@ -72,9 +72,19 @@ def test_set_service_active_uses_only_start_or_stop():
     assert result["state"] == "paused"
 
 
+def test_restart_service_uses_validated_systemctl_restart():
+    runner = FakeRunner([completed()])
+
+    restart_service("camera-stream.service", runner=runner)
+
+    assert runner.commands == [["systemctl", "restart", "camera-stream.service"]]
+
+
 def test_service_names_reject_shell_syntax():
     assert valid_service_name("pi-camera-motion.service") is True
     assert valid_service_name("camera@front.service") is True
     assert valid_service_name("camera.service;reboot") is False
     with pytest.raises(ValueError, match="invalid systemd service name"):
         set_service_active("camera.service;reboot", True)
+    with pytest.raises(ValueError, match="invalid systemd service name"):
+        restart_service("camera.service;reboot")

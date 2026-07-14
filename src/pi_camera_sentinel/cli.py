@@ -20,6 +20,12 @@ from .health import check_health
 from .masks import MotionMask, load_motion_masks
 from .motion import changed_pixel_ratio, fetch_snapshot, normalize_image, summarize_ratios
 from .policy import load_alert_policy
+from .recovery import (
+    RecoveryState,
+    load_recovery_state,
+    recovery_watchdog_step,
+    validate_recovery_config,
+)
 from .telegram import get_chat_ids, send_media_group, send_message, send_photo, send_video
 from .webhook import deliver_webhook, webhook_payload
 
@@ -432,6 +438,62 @@ def cmd_exposure_watchdog(settings: Settings, _args: argparse.Namespace) -> int:
         time.sleep(settings.exposure_watchdog_interval)
 
 
+def recovery_state_or_default(settings: Settings) -> RecoveryState:
+    try:
+        return load_recovery_state(
+            settings.recovery_state_file,
+            stream_service=settings.stream_service,
+        )
+    except (OSError, ValueError) as exc:
+        LOG.warning("recovery state is unreadable; starting fresh: %s", exc)
+        return RecoveryState(stream_service=settings.stream_service)
+
+
+def cmd_recovery_step(settings: Settings, args: argparse.Namespace) -> int:
+    try:
+        validate_recovery_config(settings)
+    except ValueError as exc:
+        LOG.error("invalid feed recovery configuration: %s", exc)
+        return 2
+    result = recovery_watchdog_step(settings, recovery_state_or_default(settings))
+    if args.json:
+        print(json.dumps(result.to_dict(), sort_keys=True))
+    return 1 if result.status == "failed" else 0
+
+
+def cmd_recovery_watchdog(settings: Settings, _args: argparse.Namespace) -> int:
+    try:
+        validate_recovery_config(settings)
+    except ValueError as exc:
+        LOG.error("invalid feed recovery configuration: %s", exc)
+        return 2
+    state = recovery_state_or_default(settings)
+    LOG.info(
+        "starting feed recovery interval=%ss failures=%s stale=%ss cooldown=%ss stream=%s",
+        settings.recovery_interval_seconds,
+        settings.recovery_failure_threshold,
+        settings.recovery_stale_seconds,
+        settings.recovery_cooldown_seconds,
+        settings.stream_service,
+    )
+    while True:
+        try:
+            state = recovery_watchdog_step(settings, state)
+            LOG.info(
+                "feed recovery status=%s failures=%s restarts=%s reason=%s",
+                state.status,
+                state.consecutive_failures,
+                state.restart_count,
+                state.last_reason,
+            )
+        except KeyboardInterrupt:
+            LOG.info("stopping")
+            return 0
+        except Exception:
+            LOG.exception("feed recovery cycle failed")
+        time.sleep(settings.recovery_interval_seconds)
+
+
 def cmd_serve(settings: Settings, _args: argparse.Namespace) -> int:
     serve_dashboard(settings)
     return 0
@@ -465,6 +527,18 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("exposure-watchdog", help="continuously adjust camera profile when image is too dark or washed out").set_defaults(
         func=cmd_exposure_watchdog
     )
+
+    recovery_once = subparsers.add_parser(
+        "recovery-step",
+        help="check feed health once and restart a failed stream when required",
+    )
+    recovery_once.add_argument("--json", action="store_true", help="print recovery state as JSON")
+    recovery_once.set_defaults(func=cmd_recovery_step)
+
+    subparsers.add_parser(
+        "recovery-watchdog",
+        help="continuously recover an unavailable or stale camera feed",
+    ).set_defaults(func=cmd_recovery_watchdog)
 
     profile = subparsers.add_parser("camera-profile", help="apply a named v4l2 camera profile")
     profile.add_argument("profile", choices=sorted(PROFILES))

@@ -26,6 +26,7 @@ from .config import Settings
 from .health import disk_status, recent_undervoltage_seen
 from .masks import MAX_MOTION_MASKS, load_motion_masks, save_motion_masks, validate_motion_masks
 from .policy import AlertPolicy, load_alert_policy, save_alert_policy
+from .recovery import RecoveryState, load_recovery_state
 from .services import service_state, set_service_active
 from .webhook import deliver_webhook, webhook_payload
 
@@ -138,6 +139,19 @@ def collect_dashboard_status(
     if undervoltage_seen:
         warnings.append("recent Pi kernel logs report undervoltage")
 
+    try:
+        recovery_state = load_recovery_state(
+            settings.recovery_state_file,
+            stream_service=settings.stream_service,
+        )
+    except (OSError, ValueError):
+        recovery_state = RecoveryState(
+            status="unavailable",
+            stream_service=settings.stream_service,
+            last_reason="Recovery state is unreadable",
+        )
+        warnings.append("feed recovery state is unreadable")
+
     feed_ok = bool(feed["ok"] and feed["online"])
     if not feed_ok or not camera_exists:
         state = "offline"
@@ -162,7 +176,14 @@ def collect_dashboard_status(
                 "enabled": settings.alert_batch_seconds > 0,
                 "window_seconds": settings.alert_batch_seconds,
                 "max_photos": settings.alert_batch_max_photos,
-            }
+            },
+            "feed_recovery": {
+                "interval_seconds": settings.recovery_interval_seconds,
+                "failure_threshold": settings.recovery_failure_threshold,
+                "stale_seconds": settings.recovery_stale_seconds,
+                "cooldown_seconds": settings.recovery_cooldown_seconds,
+                "state": recovery_state.to_dict(),
+            },
         },
         "system": {
             "hostname": socket.gethostname(),
@@ -397,12 +418,14 @@ class DashboardApplication:
         with self._service_lock:
             return {
                 "motion": service_state(self.settings.motion_service),
+                "recovery": service_state(self.settings.recovery_service),
                 "watchdog": service_state(self.settings.exposure_service),
             }
 
     def update_service(self, service_id: str, active: bool) -> dict[str, object]:
         service_names = {
             "motion": self.settings.motion_service,
+            "recovery": self.settings.recovery_service,
             "watchdog": self.settings.exposure_service,
         }
         try:

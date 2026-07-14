@@ -6,8 +6,8 @@
     <meta name="theme-color" content="#171a18">
     <meta name="color-scheme" content="light">
     <title>Pi Camera Sentinel</title>
-    <link rel="stylesheet" href="/assets/styles.css?v=0.9.0">
-    <script src="/assets/app.js?v=0.9.0" defer></script>
+    <link rel="stylesheet" href="/assets/styles.css?v=1.0.0">
+    <script src="/assets/app.js?v=1.0.0" defer></script>
   </head>
   <body>
     <header class="topbar">
@@ -17,7 +17,7 @@
           <span class="brand-kicker">Private camera</span>
           <span class="brand-name-row">
             <strong id="app-title">Pi Camera Sentinel</strong>
-            <span class="app-version" id="app-version">v0.9.0</span>
+            <span class="app-version" id="app-version">v1.0.0</span>
           </span>
         </span>
       </a>
@@ -130,6 +130,24 @@
             </div>
             <div class="service-action">
               <strong id="alert-batch-state">Checking</strong>
+            </div>
+          </article>
+
+          <article class="service-row" id="recovery-service-row" data-state="loading">
+            <div class="service-copy">
+              <span class="service-signal" aria-hidden="true"></span>
+              <div>
+                <h3>Feed recovery</h3>
+                <p id="recovery-service-detail">Reading recovery state</p>
+              </div>
+            </div>
+            <div class="service-action">
+              <strong id="recovery-service-state">Checking</strong>
+              <label class="toggle-control service-toggle" title="Pause or resume automatic feed recovery">
+                <input type="checkbox" id="recovery-service-toggle" disabled>
+                <span class="toggle-track" aria-hidden="true"></span>
+                <span class="visually-hidden">Feed recovery enabled</span>
+              </label>
             </div>
           </article>
 

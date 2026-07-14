@@ -17,6 +17,7 @@
 - batched Telegram albums for nearby motion detections
 - camera tuning profiles
 - exposure watchdog for black/washed-out frames
+- automatic feed recovery with restart thresholds and cooldown protection
 - systemd installer
 
 ## Non-Goals For Now

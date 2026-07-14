@@ -42,6 +42,7 @@ def dashboard_settings(tmp_path) -> Settings:
         output_dir=tmp_path,
         disk_min_free_mb=0,
         dashboard_title="Garden camera",
+        recovery_state_file=tmp_path / "recovery-state.json",
     )
 
 
@@ -74,6 +75,8 @@ def test_collect_dashboard_status_for_online_feed(tmp_path):
         "window_seconds": 8.0,
         "max_photos": 4,
     }
+    assert result["automation"]["feed_recovery"]["state"]["status"] == "unknown"
+    assert result["automation"]["feed_recovery"]["failure_threshold"] == 3
     assert result["integrations"]["home_assistant"]["configured"] is False
 
 
@@ -231,3 +234,22 @@ def test_dashboard_webhook_test_hides_configured_url(monkeypatch, tmp_path):
 
     assert result == {"configured": True, "delivered": True, "status_code": 202}
     assert "secret-id" not in str(result)
+
+
+def test_dashboard_services_include_feed_recovery(monkeypatch, tmp_path):
+    settings = replace(
+        dashboard_settings(tmp_path),
+        motion_service="motion.service",
+        recovery_service="recovery.service",
+        exposure_service="exposure.service",
+    )
+    observed = []
+    monkeypatch.setattr(
+        "pi_camera_sentinel.dashboard.service_state",
+        lambda name: observed.append(name) or {"name": name},
+    )
+
+    services = DashboardApplication(settings).services()
+
+    assert list(services) == ["motion", "recovery", "watchdog"]
+    assert observed == ["motion.service", "recovery.service", "exposure.service"]
