@@ -19,6 +19,7 @@ This project is intentionally small: no cloud camera account, no public port for
 - Provides camera profiles for common USB webcam exposure issues.
 - Can automatically switch between day and low-light exposure profiles.
 - Automatically restarts an unavailable or stale feed after repeated failed checks.
+- Records recent feed outages, restart attempts, and successful recoveries.
 - Includes health checks for feed availability and Pi undervoltage warnings.
 - Reports low storage, CPU temperature, frame freshness, and camera availability.
 - Shows live motion-alert and exposure-watchdog service state with pause and resume controls.
@@ -125,7 +126,7 @@ The `pi-camera-sentinel serve` command provides a small same-origin web app on p
 - current frame age, resolution, dropped-frame count, and exposure level
 - camera, power, temperature, uptime, and storage status
 - motion-alert and exposure-recovery state with pause and resume toggles
-- feed-recovery state, restart history, and pause control
+- feed-recovery state, incident history, manual restart action, and pause control
 - active Telegram alert-batching window and photo limit
 - secret-safe Home Assistant webhook state and test delivery
 - quiet-hours schedule controls for Telegram notifications
@@ -133,7 +134,7 @@ The `pi-camera-sentinel serve` command provides a small same-origin web app on p
 - camera profiles plus safe manual exposure, color, gain, sharpness, and white-balance controls
 - retained motion snapshots with 24-hour, 7-day, and all-time filters
 - archive totals and paginated access to older captures
-- `/healthz`, `/api/status`, `/api/camera`, `/api/policy`, `/api/masks`, and `/api/webhook/test` endpoints for monitoring and control
+- `/healthz`, `/api/status`, `/api/camera`, `/api/policy`, `/api/masks`, `/api/recovery/restart`, and `/api/webhook/test` endpoints for monitoring and control
 
 The event API at `/api/events` accepts a validated `window` (`24h`, `7d`, or `all`), a page `limit`, and an optional `before` cursor. Responses include retained-file counts and storage totals as well as the current page.
 
@@ -155,7 +156,7 @@ SENTINEL_RECOVERY_STALE_SECONDS=20
 SENTINEL_RECOVERY_COOLDOWN_SECONDS=120
 ```
 
-A failed HTTP request, non-image or empty response, explicit ustreamer offline signal, or frame timestamp older than the stale limit counts as a failure. Identical pixels do not count as stale, so a still scene cannot cause a restart loop. Recovery state and restart totals are stored atomically in `SENTINEL_RECOVERY_STATE_FILE` and displayed in the dashboard.
+A failed HTTP request, non-image or empty response, explicit ustreamer offline signal, or frame timestamp older than the stale limit counts as a failure. Identical pixels do not count as stale, so a still scene cannot cause a restart loop. Recovery state, restart totals, and the 20 most recent incidents are stored atomically in `SENTINEL_RECOVERY_STATE_FILE` and displayed in the dashboard. The dashboard also provides a guarded **Restart feed** action for immediate intervention.
 
 Run one check manually with `pi-camera-sentinel recovery-step --json`. See [docs/recovery.md](docs/recovery.md).
 

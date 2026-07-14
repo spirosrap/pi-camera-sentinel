@@ -16,6 +16,7 @@ from pi_camera_sentinel.dashboard import (
     same_origin,
     with_query,
 )
+from pi_camera_sentinel.recovery import RecoveryEvent, RecoveryState
 
 
 class FakeResponse:
@@ -253,3 +254,52 @@ def test_dashboard_services_include_feed_recovery(monkeypatch, tmp_path):
 
     assert list(services) == ["motion", "recovery", "watchdog"]
     assert observed == ["motion.service", "recovery.service", "exposure.service"]
+
+
+def test_dashboard_manual_restart_returns_persisted_recovery_state(monkeypatch, tmp_path):
+    settings = replace(
+        dashboard_settings(tmp_path),
+        stream_service="camera-stream.service",
+    )
+    app = DashboardApplication(settings)
+    app._status = {"cached": True}
+    observed = []
+    restarted = RecoveryState(
+        status="restarted",
+        stream_service=settings.stream_service,
+        restart_count=1,
+        events=(
+            RecoveryEvent(
+                "stream_restarted",
+                "2026-07-15T10:00:00+00:00",
+                "Manual feed restart requested",
+                "manual",
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        "pi_camera_sentinel.dashboard.manual_restart_feed",
+        lambda current_settings, state: observed.append((current_settings, state)) or restarted,
+    )
+
+    result = app.restart_feed()
+
+    assert observed[0][0] is settings
+    assert observed[0][1].stream_service == settings.stream_service
+    assert result == restarted.to_dict()
+    assert app._status is None
+
+
+def test_dashboard_manual_restart_failure_invalidates_cached_status(monkeypatch, tmp_path):
+    app = DashboardApplication(dashboard_settings(tmp_path))
+    app._status = {"cached": True}
+
+    def fail_restart(_settings, _state):
+        raise OSError("restart failed")
+
+    monkeypatch.setattr("pi_camera_sentinel.dashboard.manual_restart_feed", fail_restart)
+
+    with pytest.raises(OSError, match="restart failed"):
+        app.restart_feed()
+
+    assert app._status is None

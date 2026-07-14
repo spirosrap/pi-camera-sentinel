@@ -24,6 +24,14 @@ RECOVERY_STATUSES = {
     "failed",
     "unavailable",
 }
+RECOVERY_EVENT_TYPES = {
+    "feed_unhealthy",
+    "stream_restarted",
+    "feed_recovered",
+    "restart_failed",
+}
+RECOVERY_EVENT_TRIGGERS = {"automatic", "manual"}
+MAX_RECOVERY_EVENTS = 20
 
 
 @dataclass(frozen=True)
@@ -33,6 +41,36 @@ class FeedProbe:
     reason: str
     status_code: int | None = None
     frame_age_seconds: float | None = None
+
+
+@dataclass(frozen=True)
+class RecoveryEvent:
+    type: str
+    occurred_at: str
+    reason: str
+    trigger: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.type not in RECOVERY_EVENT_TYPES:
+            raise ValueError("unknown recovery event type")
+        if not self.occurred_at or not self.reason:
+            raise ValueError("recovery event timestamp and reason are required")
+        if self.trigger is not None and self.trigger not in RECOVERY_EVENT_TRIGGERS:
+            raise ValueError("unknown recovery event trigger")
+
+    @classmethod
+    def from_dict(cls, payload: object) -> "RecoveryEvent":
+        if not isinstance(payload, dict):
+            raise ValueError("recovery event must be a JSON object")
+        event_type = payload.get("type")
+        occurred_at = payload.get("occurred_at")
+        reason = payload.get("reason")
+        trigger = payload.get("trigger")
+        if not isinstance(event_type, str) or not isinstance(occurred_at, str) or not isinstance(reason, str):
+            raise ValueError("recovery event text fields are invalid")
+        if trigger is not None and not isinstance(trigger, str):
+            raise ValueError("recovery event trigger must be text or null")
+        return cls(event_type, occurred_at, reason, trigger)
 
 
 @dataclass(frozen=True)
@@ -47,12 +85,17 @@ class RecoveryState:
     last_restart_at: str | None = None
     cooldown_until: str | None = None
     last_reason: str = "No checks recorded"
+    events: tuple[RecoveryEvent, ...] = ()
 
     def __post_init__(self) -> None:
         if self.status not in RECOVERY_STATUSES:
             raise ValueError("unknown recovery status")
         if self.consecutive_failures < 0 or self.restart_count < 0:
             raise ValueError("recovery counters cannot be negative")
+        if len(self.events) > MAX_RECOVERY_EVENTS:
+            raise ValueError("too many recovery events")
+        if not all(isinstance(event, RecoveryEvent) for event in self.events):
+            raise ValueError("recovery events are invalid")
 
     @classmethod
     def from_dict(cls, payload: object, *, stream_service: str = "") -> "RecoveryState":
@@ -76,6 +119,10 @@ class RecoveryState:
         stored_service = payload.get("stream_service", stream_service)
         if not isinstance(status, str) or not isinstance(reason, str) or not isinstance(stored_service, str):
             raise ValueError("recovery state text fields are invalid")
+        raw_events = payload.get("events", [])
+        if not isinstance(raw_events, list):
+            raise ValueError("recovery state events must be a list")
+        events = tuple(RecoveryEvent.from_dict(event) for event in raw_events)
         return cls(
             status=status,
             stream_service=stored_service or stream_service,
@@ -87,6 +134,7 @@ class RecoveryState:
             last_restart_at=optional_text("last_restart_at"),
             cooldown_until=optional_text("cooldown_until"),
             last_reason=reason,
+            events=events[-MAX_RECOVERY_EVENTS:],
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -199,6 +247,72 @@ def _parse_time(value: str | None) -> dt.datetime | None:
     return parsed
 
 
+def append_recovery_event(
+    state: RecoveryState,
+    event_type: str,
+    occurred_at: str,
+    reason: str,
+    *,
+    trigger: str | None = None,
+) -> RecoveryState:
+    event = RecoveryEvent(event_type, occurred_at, reason, trigger)
+    return replace(state, events=(*state.events, event)[-MAX_RECOVERY_EVENTS:])
+
+
+def manual_restart_feed(
+    settings: Settings,
+    state: RecoveryState,
+    *,
+    restarter: Callable[[str], None] = restart_service,
+    now: dt.datetime | None = None,
+) -> RecoveryState:
+    validate_recovery_config(settings)
+    current = now or dt.datetime.now(dt.timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=dt.timezone.utc)
+    occurred_at = current.isoformat()
+    cooldown_until = current + dt.timedelta(seconds=settings.recovery_cooldown_seconds)
+    try:
+        restarter(settings.stream_service)
+    except (OSError, ValueError) as exc:
+        updated = replace(
+            state,
+            status="failed",
+            stream_service=settings.stream_service,
+            cooldown_until=cooldown_until.isoformat(),
+            last_reason="Manual stream restart failed",
+        )
+        updated = append_recovery_event(
+            updated,
+            "restart_failed",
+            occurred_at,
+            updated.last_reason,
+            trigger="manual",
+        )
+        save_recovery_state(settings.recovery_state_file, updated)
+        raise OSError("manual stream restart failed") from exc
+
+    updated = replace(
+        state,
+        status="restarted",
+        stream_service=settings.stream_service,
+        consecutive_failures=0,
+        restart_count=state.restart_count + 1,
+        last_restart_at=occurred_at,
+        cooldown_until=cooldown_until.isoformat(),
+        last_reason="Manual feed restart requested",
+    )
+    updated = append_recovery_event(
+        updated,
+        "stream_restarted",
+        occurred_at,
+        updated.last_reason,
+        trigger="manual",
+    )
+    save_recovery_state(settings.recovery_state_file, updated)
+    return updated
+
+
 def recovery_watchdog_step(
     settings: Settings,
     state: RecoveryState,
@@ -225,6 +339,13 @@ def recovery_watchdog_step(
             consecutive_failures=0,
             last_healthy_at=result.checked_at,
         )
+        if state.status in {"failing", "cooldown", "restarted", "failed"}:
+            updated = append_recovery_event(
+                updated,
+                "feed_recovered",
+                result.checked_at,
+                result.reason,
+            )
         save_recovery_state(settings.recovery_state_file, updated)
         return updated
 
@@ -236,6 +357,13 @@ def recovery_watchdog_step(
         consecutive_failures=failures,
         last_failure_at=result.checked_at,
     )
+    if state.status not in {"failing", "cooldown", "failed"}:
+        updated = append_recovery_event(
+            updated,
+            "feed_unhealthy",
+            result.checked_at,
+            result.reason,
+        )
     if failures < settings.recovery_failure_threshold:
         save_recovery_state(settings.recovery_state_file, updated)
         return updated
@@ -256,6 +384,13 @@ def recovery_watchdog_step(
             cooldown_until=next_cooldown.isoformat(),
             last_reason=f"{result.reason}; stream restart failed",
         )
+        updated = append_recovery_event(
+            updated,
+            "restart_failed",
+            current.isoformat(),
+            updated.last_reason,
+            trigger="automatic",
+        )
     else:
         updated = replace(
             updated,
@@ -264,6 +399,13 @@ def recovery_watchdog_step(
             restart_count=state.restart_count + 1,
             last_restart_at=current.isoformat(),
             cooldown_until=next_cooldown.isoformat(),
+        )
+        updated = append_recovery_event(
+            updated,
+            "stream_restarted",
+            current.isoformat(),
+            result.reason,
+            trigger="automatic",
         )
     save_recovery_state(settings.recovery_state_file, updated)
     return updated

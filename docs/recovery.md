@@ -15,7 +15,7 @@ systemctl status pi-camera-recovery-watchdog.service
 pi-camera-sentinel recovery-step --json
 ```
 
-The private dashboard shows whether the service is active, the latest check state, and the cumulative restart count. It also provides a pause toggle.
+The private dashboard shows whether the service is active, the latest check state, and the cumulative restart count. It also provides a pause toggle, a **Restart feed** action, and the five most recent recovery incidents.
 
 ## Conservative Defaults
 
@@ -49,3 +49,9 @@ SENTINEL_STREAM_SERVICE=camera-stream.service
 ```
 
 Service names are validated before systemd is called. Recovery state contains no bot tokens, webhook URLs, or other secrets.
+
+## Manual Recovery And History
+
+Use **Restart feed** in the private dashboard when the stream needs immediate intervention. The same-origin endpoint restarts only the service named by `SENTINEL_STREAM_SERVICE`; arbitrary service names are never accepted from the browser. A manual restart also starts the normal cooldown so it cannot combine with the watchdog into a rapid restart loop.
+
+The state file retains the 20 most recent feed failures, automatic or manual restart attempts, failed restarts, and successful recoveries. The dashboard shows the newest five. Existing v1.0 state files are upgraded in place when the next recovery event is written.

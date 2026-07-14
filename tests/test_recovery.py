@@ -6,9 +6,13 @@ import requests
 
 from pi_camera_sentinel.config import Settings
 from pi_camera_sentinel.recovery import (
+    MAX_RECOVERY_EVENTS,
     FeedProbe,
+    RecoveryEvent,
     RecoveryState,
+    append_recovery_event,
     load_recovery_state,
+    manual_restart_feed,
     probe_feed,
     recovery_watchdog_step,
     save_recovery_state,
@@ -104,6 +108,7 @@ def test_recovery_restarts_after_threshold_and_obeys_cooldown(tmp_path):
     )
     assert state.status == "failing"
     assert restarts == []
+    assert [event.type for event in state.events] == ["feed_unhealthy"]
 
     state = recovery_watchdog_step(
         settings,
@@ -115,6 +120,8 @@ def test_recovery_restarts_after_threshold_and_obeys_cooldown(tmp_path):
     assert state.status == "restarted"
     assert state.restart_count == 1
     assert restarts == ["camera-stream.service"]
+    assert [event.type for event in state.events] == ["feed_unhealthy", "stream_restarted"]
+    assert state.events[-1].trigger == "automatic"
 
     state = recovery_watchdog_step(
         settings,
@@ -132,6 +139,11 @@ def test_recovery_restarts_after_threshold_and_obeys_cooldown(tmp_path):
     )
     assert state.status == "cooldown"
     assert restarts == ["camera-stream.service"]
+    assert [event.type for event in state.events] == [
+        "feed_unhealthy",
+        "stream_restarted",
+        "feed_unhealthy",
+    ]
 
 
 def test_recovery_state_round_trip_and_healthy_reset(tmp_path):
@@ -164,7 +176,83 @@ def test_recovery_state_round_trip_and_healthy_reset(tmp_path):
     assert result.status == "healthy"
     assert result.consecutive_failures == 0
     assert result.restart_count == 2
+    assert [event.type for event in result.events] == ["feed_recovered"]
     assert load_recovery_state(settings.recovery_state_file) == result
+
+
+def test_recovery_state_loads_v1_state_without_events(tmp_path):
+    path = tmp_path / "recovery-state.json"
+    path.write_text('{"status":"healthy","restart_count":2}', encoding="utf-8")
+
+    state = load_recovery_state(path, stream_service="camera-stream.service")
+
+    assert state.status == "healthy"
+    assert state.restart_count == 2
+    assert state.stream_service == "camera-stream.service"
+    assert state.events == ()
+
+
+def test_recovery_event_history_is_bounded():
+    state = RecoveryState()
+    for index in range(MAX_RECOVERY_EVENTS + 5):
+        state = append_recovery_event(
+            state,
+            "feed_unhealthy",
+            f"2026-07-15T10:00:{index:02d}+00:00",
+            f"failure {index}",
+        )
+
+    assert len(state.events) == MAX_RECOVERY_EVENTS
+    assert state.events[0].reason == "failure 5"
+    assert state.events[-1].reason == "failure 24"
+
+
+def test_manual_restart_persists_event_and_cooldown(tmp_path):
+    settings = recovery_settings(tmp_path)
+    now = dt.datetime(2026, 7, 15, 10, 0, tzinfo=dt.timezone.utc)
+    restarted = []
+
+    result = manual_restart_feed(
+        settings,
+        RecoveryState(status="healthy", stream_service=settings.stream_service, restart_count=2),
+        restarter=restarted.append,
+        now=now,
+    )
+
+    assert restarted == ["camera-stream.service"]
+    assert result.status == "restarted"
+    assert result.restart_count == 3
+    assert result.cooldown_until == "2026-07-15T10:02:00+00:00"
+    assert result.events == (
+        RecoveryEvent(
+            "stream_restarted",
+            "2026-07-15T10:00:00+00:00",
+            "Manual feed restart requested",
+            "manual",
+        ),
+    )
+    assert load_recovery_state(settings.recovery_state_file) == result
+
+
+def test_manual_restart_failure_is_recorded(tmp_path):
+    settings = recovery_settings(tmp_path)
+
+    def fail_restart(_service):
+        raise OSError("systemd failed")
+
+    with pytest.raises(OSError, match="manual stream restart failed"):
+        manual_restart_feed(
+            settings,
+            RecoveryState(status="healthy", stream_service=settings.stream_service),
+            restarter=fail_restart,
+            now=dt.datetime(2026, 7, 15, 10, 0, tzinfo=dt.timezone.utc),
+        )
+
+    state = load_recovery_state(settings.recovery_state_file)
+    assert state.status == "failed"
+    assert state.restart_count == 0
+    assert state.events[-1].type == "restart_failed"
+    assert state.events[-1].trigger == "manual"
 
 
 def test_recovery_configuration_rejects_unsafe_service_name(tmp_path):

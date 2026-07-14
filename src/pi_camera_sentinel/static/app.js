@@ -59,6 +59,9 @@ const elements = {
   quietHoursStart: document.querySelector("#quiet-hours-start"),
   quietHoursToggle: document.querySelector("#quiet-hours-toggle"),
   reconnectButton: document.querySelector("#reconnect-button"),
+  recoveryHistoryList: document.querySelector("#recovery-history-list"),
+  recoveryHistoryMeta: document.querySelector("#recovery-history-meta"),
+  recoveryRestartButton: document.querySelector("#recovery-restart"),
   servicesMeta: document.querySelector("#services-meta"),
   snapshotButton: document.querySelector("#snapshot-button"),
   storageDetail: document.querySelector("#storage-detail"),
@@ -98,6 +101,7 @@ const viewState = {
   policyBusy: false,
   policyDirty: false,
   policyState: null,
+  recoveryBusy: false,
   recoveryState: null,
   serviceBusy: new Set(),
   serviceStates: {},
@@ -344,9 +348,72 @@ function recoveryDetail(recovery) {
 
 function renderFeedRecovery(recovery) {
   viewState.recoveryState = recovery;
+  renderRecoveryHistory(recovery?.state?.events || []);
   if (viewState.serviceStates.recovery) {
     renderService("recovery", viewState.serviceStates.recovery);
   }
+}
+
+function recoveryEventLabel(event) {
+  if (event.type === "feed_unhealthy") return "Feed became unhealthy";
+  if (event.type === "feed_recovered") return "Feed recovered";
+  if (event.type === "stream_restarted") {
+    return event.trigger === "manual" ? "Manual feed restart" : "Automatic feed restart";
+  }
+  if (event.type === "restart_failed") {
+    return event.trigger === "manual" ? "Manual restart failed" : "Automatic restart failed";
+  }
+  return "Recovery update";
+}
+
+function renderRecoveryHistory(events) {
+  const recent = Array.isArray(events) ? events.slice(-5).reverse() : [];
+  elements.recoveryHistoryList.replaceChildren();
+  elements.recoveryHistoryMeta.textContent = recent.length
+    ? `${recent.length} recent ${recent.length === 1 ? "incident" : "incidents"}`
+    : "No incidents recorded";
+
+  recent.forEach((event) => {
+    const item = document.createElement("li");
+    const copy = document.createElement("div");
+    const label = document.createElement("strong");
+    const reason = document.createElement("span");
+    const time = document.createElement("time");
+    label.textContent = recoveryEventLabel(event);
+    reason.textContent = event.reason || "No detail recorded";
+    time.dateTime = event.occurred_at || "";
+    time.textContent = event.occurred_at ? formatRelative(event.occurred_at) : "time unavailable";
+    copy.append(label, reason);
+    item.append(copy, time);
+    elements.recoveryHistoryList.append(item);
+  });
+}
+
+async function restartFeed() {
+  if (viewState.recoveryBusy) return;
+  viewState.recoveryBusy = true;
+  const currentService = viewState.serviceStates.recovery;
+  if (currentService) renderService("recovery", currentService);
+  elements.servicesMeta.textContent = "Restarting feed";
+  try {
+    const state = await requestJSON("/api/recovery/restart", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    renderFeedRecovery({ ...(viewState.recoveryState || {}), state });
+    elements.servicesMeta.textContent = "Feed restart requested";
+    setTimeout(startStream, 1200);
+  } catch (error) {
+    elements.servicesMeta.textContent = error.message;
+  } finally {
+    viewState.recoveryBusy = false;
+    if (viewState.serviceStates.recovery) {
+      renderService("recovery", viewState.serviceStates.recovery);
+    }
+  }
+  await refreshStatus();
+  await refreshServices();
 }
 
 function renderWebhookIntegration(integration, message = null) {
@@ -415,6 +482,11 @@ function renderService(serviceId, state) {
   target.toggle.checked = Boolean(state.active);
   target.toggle.disabled = viewState.serviceBusy.has(serviceId) || !state.available;
   target.toggle.setAttribute("aria-busy", String(viewState.serviceBusy.has(serviceId)));
+  if (serviceId === "recovery") {
+    elements.recoveryRestartButton.disabled = viewState.recoveryBusy || !state.available;
+    elements.recoveryRestartButton.textContent = viewState.recoveryBusy ? "Restarting" : "Restart feed";
+    elements.recoveryRestartButton.setAttribute("aria-busy", String(viewState.recoveryBusy));
+  }
 }
 
 function renderServices(services) {
@@ -1146,6 +1218,7 @@ elements.maskCanvas.addEventListener("pointermove", moveMaskPointer);
 elements.maskCanvas.addEventListener("pointerup", finishMaskPointer);
 elements.maskCanvas.addEventListener("pointercancel", cancelMaskPointer);
 elements.webhookTestButton.addEventListener("click", sendWebhookTest);
+elements.recoveryRestartButton.addEventListener("click", restartFeed);
 eventRangeButtons.forEach((button) => {
   button.addEventListener("click", () => selectEventWindow(button.dataset.eventWindow));
 });

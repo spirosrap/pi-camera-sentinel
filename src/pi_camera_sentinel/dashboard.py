@@ -26,7 +26,7 @@ from .config import Settings
 from .health import disk_status, recent_undervoltage_seen
 from .masks import MAX_MOTION_MASKS, load_motion_masks, save_motion_masks, validate_motion_masks
 from .policy import AlertPolicy, load_alert_policy, save_alert_policy
-from .recovery import RecoveryState, load_recovery_state
+from .recovery import RecoveryState, load_recovery_state, manual_restart_feed
 from .services import service_state, set_service_active
 from .webhook import deliver_webhook, webhook_payload
 
@@ -327,6 +327,7 @@ class DashboardApplication:
         self._camera_lock = threading.RLock()
         self._mask_lock = threading.RLock()
         self._policy_lock = threading.RLock()
+        self._recovery_lock = threading.RLock()
         self._service_lock = threading.RLock()
 
     def status(self) -> dict:
@@ -413,6 +414,19 @@ class DashboardApplication:
             "delivered": True,
             "status_code": status_code,
         }
+
+    def restart_feed(self) -> dict[str, object]:
+        with self._recovery_lock:
+            state = load_recovery_state(
+                self.settings.recovery_state_file,
+                stream_service=self.settings.stream_service,
+            )
+            try:
+                updated = manual_restart_feed(self.settings, state)
+            finally:
+                self._status = None
+                self._status_at = 0.0
+            return updated.to_dict()
 
     def services(self) -> dict[str, dict[str, object]]:
         with self._service_lock:
@@ -566,6 +580,8 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             self.run_motion_masks_action(lambda: self.app.update_motion_masks(payload))
         elif path == "/api/webhook/test":
             self.run_webhook_action(self.app.send_webhook_test)
+        elif path == "/api/recovery/restart":
+            self.run_recovery_action(self.app.restart_feed)
         elif path.startswith("/api/services/"):
             service_id = path.removeprefix("/api/services/")
             active = payload.get("active")
@@ -655,6 +671,15 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         except requests.RequestException as exc:
             LOG.warning("Home Assistant webhook test failed: %s", exc)
             self.send_json({"error": "Home Assistant webhook delivery failed"}, HTTPStatus.BAD_GATEWAY)
+
+    def run_recovery_action(self, action: Callable[[], dict[str, object]]) -> None:
+        try:
+            self.send_json(action())
+        except ValueError as exc:
+            self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+        except (OSError, subprocess.SubprocessError) as exc:
+            LOG.warning("manual feed recovery failed: %s", exc)
+            self.send_json({"error": "feed restart is unavailable"}, HTTPStatus.SERVICE_UNAVAILABLE)
 
     def serve_static(self, name: str) -> None:
         target = (STATIC_DIR / name).resolve()

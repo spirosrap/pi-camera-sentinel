@@ -6,8 +6,8 @@
     <meta name="theme-color" content="#171a18">
     <meta name="color-scheme" content="light">
     <title>Pi Camera Sentinel</title>
-    <link rel="stylesheet" href="/assets/styles.css?v=1.0.0">
-    <script src="/assets/app.js?v=1.0.0" defer></script>
+    <link rel="stylesheet" href="/assets/styles.css?v=1.1.0">
+    <script src="/assets/app.js?v=1.1.0" defer></script>
   </head>
   <body>
     <header class="topbar">
@@ -17,7 +17,7 @@
           <span class="brand-kicker">Private camera</span>
           <span class="brand-name-row">
             <strong id="app-title">Pi Camera Sentinel</strong>
-            <span class="app-version" id="app-version">v1.0.0</span>
+            <span class="app-version" id="app-version">v1.1.0</span>
           </span>
         </span>
       </a>
@@ -141,8 +141,9 @@
                 <p id="recovery-service-detail">Reading recovery state</p>
               </div>
             </div>
-            <div class="service-action">
+            <div class="service-action recovery-action">
               <strong id="recovery-service-state">Checking</strong>
+              <button type="button" id="recovery-restart" title="Restart the configured camera feed service" disabled>Restart feed</button>
               <label class="toggle-control service-toggle" title="Pause or resume automatic feed recovery">
                 <input type="checkbox" id="recovery-service-toggle" disabled>
                 <span class="toggle-track" aria-hidden="true"></span>
@@ -150,6 +151,14 @@
               </label>
             </div>
           </article>
+
+          <div class="recovery-history" id="recovery-history">
+            <div class="recovery-history-heading">
+              <h3>Recovery activity</h3>
+              <p id="recovery-history-meta">No incidents recorded</p>
+            </div>
+            <ol id="recovery-history-list" aria-live="polite"></ol>
+          </div>
 
           <article class="service-row" id="watchdog-service-row" data-state="loading">
             <div class="service-copy">

@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.0 - 2026-07-15
+
+- Add a dashboard action for immediately restarting the configured camera feed service.
+- Record feed failures, automatic and manual restarts, failed restarts, and recoveries.
+- Keep a bounded 20-entry recovery history and show the five most recent incidents.
+- Reload persisted watchdog state each cycle so dashboard actions remain authoritative.
+- Preserve v1.0 recovery state files that do not contain incident history.
+
 ## 1.0.0 - 2026-07-14
 
 - Add an automatic watchdog for unavailable, offline, empty, or stale camera snapshots.

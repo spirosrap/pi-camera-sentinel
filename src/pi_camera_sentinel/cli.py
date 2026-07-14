@@ -467,7 +467,6 @@ def cmd_recovery_watchdog(settings: Settings, _args: argparse.Namespace) -> int:
     except ValueError as exc:
         LOG.error("invalid feed recovery configuration: %s", exc)
         return 2
-    state = recovery_state_or_default(settings)
     LOG.info(
         "starting feed recovery interval=%ss failures=%s stale=%ss cooldown=%ss stream=%s",
         settings.recovery_interval_seconds,
@@ -478,7 +477,7 @@ def cmd_recovery_watchdog(settings: Settings, _args: argparse.Namespace) -> int:
     )
     while True:
         try:
-            state = recovery_watchdog_step(settings, state)
+            state = recovery_watchdog_step(settings, recovery_state_or_default(settings))
             LOG.info(
                 "feed recovery status=%s failures=%s restarts=%s reason=%s",
                 state.status,
