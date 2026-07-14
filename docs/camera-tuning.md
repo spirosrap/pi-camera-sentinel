@@ -74,7 +74,7 @@ SENTINEL_EXPOSURE_DARK_RATIO_MIN=0.25
 SENTINEL_EXPOSURE_BRIGHT_MEAN_MIN=230
 ```
 
-The bundled C920 low-light profile is intentionally moderate (`exposure=20`, `gain=20`). Extreme manual exposure and gain values can turn a recovering camera frame completely white.
+The bundled C920 low-light profile keeps automatic exposure enabled and does not pin exposure or gain. This lets the camera lengthen exposure for a dark scene without trapping the stream on an underexposed manual value. Extreme manual exposure and gain values can still turn a recovering frame completely white.
 
 This is more reliable than switching by clock time because it responds to the actual image: clouds, shade, outdoor lights, or a camera pointed at a bright bowl can all confuse fixed schedules.
 

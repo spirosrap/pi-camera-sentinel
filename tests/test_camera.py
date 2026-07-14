@@ -1,6 +1,7 @@
 import pytest
 
 from pi_camera_sentinel.camera import (
+    PROFILES,
     camera_state,
     detect_profile,
     parse_controls,
@@ -14,13 +15,13 @@ CONTROL_OUTPUT = """
                        contrast 0x00980901 (int)    : min=0 max=255 step=1 default=57343 value=128
                      saturation 0x00980902 (int)    : min=0 max=255 step=1 default=57343 value=128
         white_balance_automatic 0x0098090c (bool)   : default=1 value=1
-                           gain 0x00980913 (int)    : min=0 max=255 step=1 default=57343 value=20
+                           gain 0x00980913 (int)    : min=0 max=255 step=1 default=57343 value=255
            power_line_frequency 0x00980918 (menu)   : min=0 max=2 default=2 value=1 (50 Hz)
       white_balance_temperature 0x0098091a (int)    : min=2000 max=6500 step=1 default=57343 value=5619 flags=inactive
                       sharpness 0x0098091b (int)    : min=0 max=255 step=1 default=57343 value=128
          backlight_compensation 0x0098091c (int)    : min=0 max=1 step=1 default=57343 value=1
-                  auto_exposure 0x009a0901 (menu)   : min=0 max=3 default=0 value=1 (Manual Mode)
-         exposure_time_absolute 0x009a0902 (int)    : min=3 max=2047 step=1 default=250 value=19
+                  auto_exposure 0x009a0901 (menu)   : min=0 max=3 default=0 value=3 (Aperture Priority Mode)
+         exposure_time_absolute 0x009a0902 (int)    : min=3 max=2047 step=1 default=250 value=1197
 """
 
 
@@ -32,13 +33,21 @@ def test_parse_controls_reads_live_c920_format():
     assert controls["white_balance_automatic"].minimum == 0
     assert controls["white_balance_automatic"].maximum == 1
     assert controls["white_balance_temperature"].inactive is True
-    assert controls["auto_exposure"].menu_label == "Manual Mode"
+    assert controls["auto_exposure"].menu_label == "Aperture Priority Mode"
 
 
-def test_detect_profile_allows_camera_exposure_rounding():
+def test_detect_profile_allows_dynamic_auto_exposure_values():
     controls = parse_controls(CONTROL_OUTPUT)
 
     assert detect_profile(controls) == "low-light"
+
+
+def test_low_light_profile_does_not_pin_exposure_or_gain():
+    controls = PROFILES["low-light"].controls
+
+    assert controls["auto_exposure"] == 3
+    assert "exposure_time_absolute" not in controls
+    assert "gain" not in controls
 
 
 def test_camera_state_exposes_safe_ui_ranges(monkeypatch):

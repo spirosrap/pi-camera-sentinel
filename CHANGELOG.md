@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.1 - 2026-07-14
+
+- Keep automatic exposure active in the C920 low-light recovery profile.
+- Stop pinning low-light exposure and gain to values that can produce a black frame.
+- Add regression coverage for safe low-light recovery controls.
+
 ## 0.6.0 - 2026-07-14
 
 - Add timezone-aware Telegram quiet hours with overnight and all-day schedules.
