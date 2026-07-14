@@ -13,6 +13,7 @@ import requests
 
 from .camera import PROFILES, apply_profile, controls_json, list_controls
 from .config import Settings
+from .dashboard import serve_dashboard
 from .exposure import exposure_watchdog_step
 from .health import check_health
 from .motion import changed_pixel_ratio, fetch_snapshot, normalize_image, summarize_ratios
@@ -255,6 +256,11 @@ def cmd_exposure_watchdog(settings: Settings, _args: argparse.Namespace) -> int:
         time.sleep(settings.exposure_watchdog_interval)
 
 
+def cmd_serve(settings: Settings, _args: argparse.Namespace) -> int:
+    serve_dashboard(settings)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Private Raspberry Pi USB camera sentinel.")
     parser.add_argument("--verbose", action="store_true", help="enable debug logging")
@@ -269,6 +275,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("send-test", help="send one test snapshot to Telegram").set_defaults(func=cmd_send_test)
     subparsers.add_parser("show-chat-ids", help="print chat IDs from recent bot updates").set_defaults(func=cmd_show_chat_ids)
     subparsers.add_parser("healthcheck", help="check snapshot, camera, and undervoltage status").set_defaults(func=cmd_health)
+    subparsers.add_parser("serve", help="serve the web dashboard and camera proxy").set_defaults(func=cmd_serve)
     subparsers.add_parser("camera-controls", help="list v4l2 camera controls").set_defaults(func=cmd_camera_controls)
     subparsers.add_parser("camera-get", help="print common camera controls as JSON").set_defaults(func=cmd_camera_get)
 

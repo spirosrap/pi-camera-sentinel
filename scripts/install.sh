@@ -35,12 +35,7 @@ rsync -a --delete \
 
 install -d -m 0755 /var/lib/pi-camera-sentinel
 
-cat >/usr/local/bin/pi-camera-sentinel <<'WRAPPER'
-#!/usr/bin/env bash
-export PYTHONPATH=/opt/pi-camera-sentinel/src
-exec /usr/bin/python3 -m pi_camera_sentinel "$@"
-WRAPPER
-chmod 0755 /usr/local/bin/pi-camera-sentinel
+install -m 0755 "${PROJECT_ROOT}/scripts/pi-camera-sentinel" /usr/local/bin/pi-camera-sentinel
 
 if [[ ! -f "${ENV_FILE}" ]]; then
   install -m 0600 -o root -g root "${PROJECT_ROOT}/config/pi-camera-sentinel.env.example" "${ENV_FILE}"
@@ -52,6 +47,7 @@ fi
 install -m 0644 "${PROJECT_ROOT}/systemd/pi-camera-stream.service" /etc/systemd/system/pi-camera-stream.service
 install -m 0644 "${PROJECT_ROOT}/systemd/pi-camera-motion.service" /etc/systemd/system/pi-camera-motion.service
 install -m 0644 "${PROJECT_ROOT}/systemd/pi-camera-exposure-watchdog.service" /etc/systemd/system/pi-camera-exposure-watchdog.service
+install -m 0644 "${PROJECT_ROOT}/systemd/pi-camera-dashboard.service" /etc/systemd/system/pi-camera-dashboard.service
 systemctl daemon-reload
 
 echo
@@ -62,3 +58,4 @@ echo "  sudo systemctl enable --now pi-camera-stream.service"
 echo "  pi-camera-sentinel healthcheck"
 echo "  sudo systemctl enable --now pi-camera-exposure-watchdog.service"
 echo "  sudo systemctl enable --now pi-camera-motion.service"
+echo "  sudo systemctl enable --now pi-camera-dashboard.service"

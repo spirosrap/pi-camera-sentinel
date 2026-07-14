@@ -6,6 +6,8 @@
 - Telegram photo alerts on motion
 - Tailscale Serve helper
 - health check command
+- low-disk-space health check
+- private web dashboard and same-origin stream proxy
 - camera tuning profiles
 - exposure watchdog for black/washed-out frames
 - systemd installer
@@ -16,8 +18,8 @@
 - masked zones for motion detection
 - quiet hours
 - alert batching
-- low-disk-space health check
-- simple web status page
+- event metadata and alert history
+- dashboard camera profile controls
 
 ## Non-Goals For Now
 

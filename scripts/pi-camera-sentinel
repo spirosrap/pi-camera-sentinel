@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export PYTHONPATH=/opt/pi-camera-sentinel/src
+exec /usr/bin/python3 -m pi_camera_sentinel "$@"

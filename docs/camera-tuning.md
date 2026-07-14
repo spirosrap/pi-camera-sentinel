@@ -65,9 +65,12 @@ Useful config:
 SENTINEL_EXPOSURE_WATCHDOG_INTERVAL=60
 SENTINEL_EXPOSURE_DAY_PROFILE=auto
 SENTINEL_EXPOSURE_NIGHT_PROFILE=low-light
-SENTINEL_EXPOSURE_DARK_MEAN_MAX=15
+SENTINEL_EXPOSURE_DARK_MEAN_MAX=45
+SENTINEL_EXPOSURE_DARK_RATIO_MIN=0.25
 SENTINEL_EXPOSURE_BRIGHT_MEAN_MIN=230
 ```
+
+The bundled C920 low-light profile is intentionally moderate (`exposure=20`, `gain=20`). Extreme manual exposure and gain values can turn a recovering camera frame completely white.
 
 This is more reliable than switching by clock time because it responds to the actual image: clouds, shade, outdoor lights, or a camera pointed at a bright bowl can all confuse fixed schedules.
 

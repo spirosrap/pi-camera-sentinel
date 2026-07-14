@@ -7,6 +7,7 @@ This project is intentionally small: no cloud camera account, no public port for
 ## What It Does
 
 - Streams a USB webcam from a Raspberry Pi over HTTP.
+- Presents a private, responsive dashboard with live status and recent motion captures.
 - Optionally exposes the feed privately through Tailscale Serve.
 - Watches snapshots for motion using frame differencing.
 - Sends Telegram photo alerts on motion.
@@ -14,6 +15,7 @@ This project is intentionally small: no cloud camera account, no public port for
 - Provides camera profiles for common USB webcam exposure issues.
 - Can automatically switch between day and low-light exposure profiles.
 - Includes health checks for feed availability and Pi undervoltage warnings.
+- Reports low storage, CPU temperature, frame freshness, and camera availability.
 
 ## Hardware
 
@@ -50,16 +52,22 @@ sudo systemctl enable --now pi-camera-stream.service
 pi-camera-sentinel healthcheck
 ```
 
+Start the dashboard:
+
+```bash
+sudo systemctl enable --now pi-camera-dashboard.service
+```
+
 Enable automatic exposure recovery:
 
 ```bash
 sudo systemctl enable --now pi-camera-exposure-watchdog.service
 ```
 
-Open the local feed:
+Open the local dashboard:
 
 ```text
-http://PI_HOSTNAME.local:8080/
+http://127.0.0.1:8090/
 ```
 
 Configure Telegram:
@@ -93,9 +101,21 @@ Install and log into Tailscale on the Pi, then run:
 sudo scripts/tailscale-serve-setup.sh
 ```
 
-Tailscale Serve will proxy the local camera feed to a private tailnet-only URL. Put that URL in `SENTINEL_FEED_URL` so Telegram alerts include a link back to the live feed.
+Tailscale Serve will proxy the dashboard to a private HTTPS URL. The dashboard keeps the camera-compatible `/stream` and `/snapshot` routes, so existing feed links continue to work. Put the dashboard URL in `SENTINEL_FEED_URL` so Telegram alerts link back to it.
 
 See [docs/tailscale.md](docs/tailscale.md).
+
+## Web Dashboard
+
+The `pi-camera-sentinel serve` command provides a small same-origin web app on port `8090`. It includes:
+
+- live, pause, reconnect, snapshot, and fullscreen controls
+- current frame age, resolution, dropped-frame count, and exposure level
+- camera, power, temperature, uptime, and storage status
+- the most recent retained motion snapshots
+- `/healthz` and `/api/status` endpoints for monitoring
+
+The server proxies `/stream` and `/snapshot` to `ustreamer`, which keeps the raw camera port private when Tailscale Serve points at the dashboard.
 
 ## Camera Tuning
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pi-camera-sentinel"
-version = "0.1.0"
+version = "0.2.0"
 description = "Private Raspberry Pi USB webcam streaming and Telegram motion alerts."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -33,6 +33,9 @@ pi-camera-sentinel = "pi_camera_sentinel.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+pi_camera_sentinel = ["static/*.html", "static/*.css", "static/*.js"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

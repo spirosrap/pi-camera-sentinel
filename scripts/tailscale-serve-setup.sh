@@ -12,5 +12,5 @@ if [[ "${EUID}" -ne 0 ]]; then
 fi
 
 tailscale serve reset || true
-tailscale serve --bg --http=80 8080
+tailscale serve --bg --yes 8090
 tailscale serve status

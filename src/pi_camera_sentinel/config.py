@@ -64,6 +64,11 @@ class Settings:
     exposure_resize_height: int
     exposure_day_profile: str
     exposure_night_profile: str
+    disk_min_free_mb: int
+    dashboard_host: str
+    dashboard_port: int
+    dashboard_title: str
+    dashboard_status_cache_seconds: float
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -90,8 +95,8 @@ class Settings:
             camera_device=env_str("SENTINEL_CAMERA_DEVICE", "/dev/video0"),
             exposure_watchdog_interval=env_float("SENTINEL_EXPOSURE_WATCHDOG_INTERVAL", 60.0),
             exposure_settle_seconds=env_float("SENTINEL_EXPOSURE_SETTLE_SECONDS", 8.0),
-            exposure_dark_mean_max=env_float("SENTINEL_EXPOSURE_DARK_MEAN_MAX", 15.0),
-            exposure_dark_ratio_min=env_float("SENTINEL_EXPOSURE_DARK_RATIO_MIN", 0.90),
+            exposure_dark_mean_max=env_float("SENTINEL_EXPOSURE_DARK_MEAN_MAX", 45.0),
+            exposure_dark_ratio_min=env_float("SENTINEL_EXPOSURE_DARK_RATIO_MIN", 0.25),
             exposure_dark_pixel_max=env_int("SENTINEL_EXPOSURE_DARK_PIXEL_MAX", 25),
             exposure_bright_mean_min=env_float("SENTINEL_EXPOSURE_BRIGHT_MEAN_MIN", 230.0),
             exposure_bright_ratio_min=env_float("SENTINEL_EXPOSURE_BRIGHT_RATIO_MIN", 0.85),
@@ -100,6 +105,11 @@ class Settings:
             exposure_resize_height=env_int("SENTINEL_EXPOSURE_RESIZE_HEIGHT", 90),
             exposure_day_profile=env_str("SENTINEL_EXPOSURE_DAY_PROFILE", "auto"),
             exposure_night_profile=env_str("SENTINEL_EXPOSURE_NIGHT_PROFILE", "low-light"),
+            disk_min_free_mb=env_int("SENTINEL_DISK_MIN_FREE_MB", 512),
+            dashboard_host=env_str("SENTINEL_DASHBOARD_HOST", "127.0.0.1"),
+            dashboard_port=env_int("SENTINEL_DASHBOARD_PORT", 8090),
+            dashboard_title=env_str("SENTINEL_DASHBOARD_TITLE", "Pi Camera Sentinel"),
+            dashboard_status_cache_seconds=env_float("SENTINEL_DASHBOARD_STATUS_CACHE_SECONDS", 5.0),
         )
 
     def missing_telegram_fields(self) -> list[str]:

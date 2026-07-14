@@ -20,6 +20,10 @@ class HealthResult:
     snapshot_status: str
     camera_device_exists: bool
     undervoltage_seen: bool | None
+    disk_path: str
+    disk_free_bytes: int
+    disk_total_bytes: int
+    disk_low: bool
     notes: list[str]
 
     def to_json(self) -> str:
@@ -43,6 +47,20 @@ def recent_undervoltage_seen() -> bool | None:
     return "undervoltage" in text or "under-voltage" in text
 
 
+def existing_disk_path(path: Path) -> Path:
+    candidate = path.expanduser()
+    while not candidate.exists() and candidate != candidate.parent:
+        candidate = candidate.parent
+    return candidate
+
+
+def disk_status(path: Path, min_free_mb: int) -> tuple[Path, int, int, bool]:
+    disk_path = existing_disk_path(path)
+    usage = shutil.disk_usage(disk_path)
+    low = usage.free < max(min_free_mb, 0) * 1024 * 1024
+    return disk_path, usage.free, usage.total, low
+
+
 def check_health(settings: Settings) -> HealthResult:
     notes: list[str] = []
     snapshot_ok = False
@@ -64,7 +82,16 @@ def check_health(settings: Settings) -> HealthResult:
     if undervoltage:
         notes.append("recent kernel logs mention undervoltage; check Pi power supply and USB camera power draw")
 
-    ok = snapshot_ok and camera_device_exists
+    disk_path, disk_free_bytes, disk_total_bytes, disk_low = disk_status(
+        settings.output_dir,
+        settings.disk_min_free_mb,
+    )
+    if disk_low:
+        notes.append(
+            f"low disk space at {disk_path}: less than {settings.disk_min_free_mb} MB free"
+        )
+
+    ok = snapshot_ok and camera_device_exists and not disk_low
     return HealthResult(
         ok=ok,
         snapshot_url=settings.snapshot_url,
@@ -73,5 +100,9 @@ def check_health(settings: Settings) -> HealthResult:
         snapshot_status=snapshot_status,
         camera_device_exists=camera_device_exists,
         undervoltage_seen=undervoltage,
+        disk_path=str(disk_path),
+        disk_free_bytes=disk_free_bytes,
+        disk_total_bytes=disk_total_bytes,
+        disk_low=disk_low,
         notes=notes,
     )

@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#171a18">
+    <meta name="color-scheme" content="light">
+    <title>Pi Camera Sentinel</title>
+    <link rel="stylesheet" href="/assets/styles.css">
+    <script src="/assets/app.js" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Pi Camera Sentinel home">
+        <span class="brand-mark" aria-hidden="true"><span></span></span>
+        <span>
+          <span class="brand-kicker">Private camera</span>
+          <strong id="app-title">Pi Camera Sentinel</strong>
+        </span>
+      </a>
+      <div class="health-state" id="health-state" data-state="loading" role="status" aria-live="polite">
+        <span class="status-light" aria-hidden="true"></span>
+        <span id="health-label">Connecting</span>
+      </div>
+    </header>
+
+    <main>
+      <section class="viewer-section" aria-labelledby="live-heading">
+        <div class="section-heading viewer-heading">
+          <div>
+            <p class="section-kicker">Camera 01</p>
+            <h1 id="live-heading">Live view</h1>
+            <p class="section-meta" id="frame-status">Waiting for the first frame</p>
+          </div>
+          <div class="viewer-actions" aria-label="Camera controls">
+            <button type="button" id="pause-button" title="Pause or resume the live view">Pause</button>
+            <button type="button" id="reconnect-button" title="Reconnect the live view">Reconnect</button>
+            <button type="button" id="snapshot-button" title="Save the current camera frame">Save frame</button>
+            <button type="button" id="fullscreen-button" title="Open the live view in fullscreen">Fullscreen</button>
+          </div>
+        </div>
+
+        <div class="stream-shell" id="stream-shell">
+          <img id="camera-stream" alt="Live Pi camera feed">
+          <div class="stream-notice" id="stream-notice" role="status">Connecting to camera</div>
+        </div>
+
+        <div class="viewer-foot">
+          <span id="camera-source">Camera source pending</span>
+          <time id="local-clock"></time>
+        </div>
+      </section>
+
+      <aside class="warning-banner" id="warning-banner" hidden>
+        <strong>Needs attention</strong>
+        <span id="warning-copy"></span>
+      </aside>
+
+      <section class="metrics-band" aria-label="Camera and system status">
+        <article class="metric">
+          <span class="metric-label">Feed</span>
+          <strong id="feed-value">Checking</strong>
+          <span class="metric-detail" id="feed-detail">--</span>
+        </article>
+        <article class="metric">
+          <span class="metric-label">Frame</span>
+          <strong id="frame-value">--</strong>
+          <span class="metric-detail" id="frame-detail">--</span>
+        </article>
+        <article class="metric">
+          <span class="metric-label">Exposure</span>
+          <strong id="exposure-value">--</strong>
+          <span class="metric-detail" id="exposure-detail">--</span>
+        </article>
+        <article class="metric">
+          <span class="metric-label">Power</span>
+          <strong id="power-value">Checking</strong>
+          <span class="metric-detail" id="power-detail">--</span>
+        </article>
+        <article class="metric">
+          <span class="metric-label">Storage</span>
+          <strong id="storage-value">--</strong>
+          <span class="metric-detail" id="storage-detail">--</span>
+        </article>
+        <article class="metric">
+          <span class="metric-label">System</span>
+          <strong id="system-value">--</strong>
+          <span class="metric-detail" id="system-detail">--</span>
+        </article>
+      </section>
+
+      <section class="events-section" aria-labelledby="events-heading">
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">Motion archive</p>
+            <h2 id="events-heading">Recent captures</h2>
+          </div>
+          <p class="section-meta" id="events-meta">Checking for saved events</p>
+        </div>
+        <div class="event-grid" id="event-grid"></div>
+        <p class="empty-state" id="events-empty" hidden>No motion captures saved yet.</p>
+      </section>
+    </main>
+
+    <footer>
+      <span id="footer-host">Private tailnet view</span>
+      <span id="footer-version">Pi Camera Sentinel</span>
+    </footer>
+
+    <dialog id="capture-dialog" aria-labelledby="capture-title">
+      <div class="dialog-bar">
+        <strong id="capture-title">Motion capture</strong>
+        <button type="button" id="dialog-close" title="Close capture">Close</button>
+      </div>
+      <img id="capture-image" alt="Selected motion capture">
+      <time id="capture-time"></time>
+    </dialog>
+  </body>
+</html>
