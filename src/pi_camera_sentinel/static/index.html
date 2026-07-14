@@ -6,8 +6,8 @@
     <meta name="theme-color" content="#171a18">
     <meta name="color-scheme" content="light">
     <title>Pi Camera Sentinel</title>
-    <link rel="stylesheet" href="/assets/styles.css?v=0.5.0">
-    <script src="/assets/app.js?v=0.5.0" defer></script>
+    <link rel="stylesheet" href="/assets/styles.css?v=0.6.0">
+    <script src="/assets/app.js?v=0.6.0" defer></script>
   </head>
   <body>
     <header class="topbar">
@@ -17,7 +17,7 @@
           <span class="brand-kicker">Private camera</span>
           <span class="brand-name-row">
             <strong id="app-title">Pi Camera Sentinel</strong>
-            <span class="app-version" id="app-version">v0.5.0</span>
+            <span class="app-version" id="app-version">v0.6.0</span>
           </span>
         </span>
       </a>
@@ -136,6 +136,32 @@
                 <span class="visually-hidden">Exposure recovery enabled</span>
               </label>
             </div>
+          </article>
+
+          <article class="service-row policy-row" id="quiet-hours-row" data-state="loading">
+            <div class="service-copy">
+              <span class="service-signal" aria-hidden="true"></span>
+              <div>
+                <h3>Quiet hours</h3>
+                <p id="quiet-hours-detail">Reading alert schedule</p>
+              </div>
+            </div>
+            <form class="quiet-hours-form" id="quiet-hours-form">
+              <label class="toggle-control quiet-hours-toggle">
+                <input type="checkbox" id="quiet-hours-toggle" disabled>
+                <span class="toggle-track" aria-hidden="true"></span>
+                <span>Enabled</span>
+              </label>
+              <label class="clock-control">
+                <span>From</span>
+                <input type="time" id="quiet-hours-start" value="22:00" required disabled>
+              </label>
+              <label class="clock-control">
+                <span>Until</span>
+                <input type="time" id="quiet-hours-end" value="07:00" required disabled>
+              </label>
+              <button type="submit" id="quiet-hours-apply" disabled>Apply</button>
+            </form>
           </article>
         </div>
       </section>

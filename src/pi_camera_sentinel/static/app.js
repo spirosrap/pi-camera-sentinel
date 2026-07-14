@@ -36,6 +36,13 @@ const elements = {
   powerDetail: document.querySelector("#power-detail"),
   powerValue: document.querySelector("#power-value"),
   profileControls: document.querySelector("#profile-controls"),
+  quietHoursApply: document.querySelector("#quiet-hours-apply"),
+  quietHoursDetail: document.querySelector("#quiet-hours-detail"),
+  quietHoursEnd: document.querySelector("#quiet-hours-end"),
+  quietHoursForm: document.querySelector("#quiet-hours-form"),
+  quietHoursRow: document.querySelector("#quiet-hours-row"),
+  quietHoursStart: document.querySelector("#quiet-hours-start"),
+  quietHoursToggle: document.querySelector("#quiet-hours-toggle"),
   reconnectButton: document.querySelector("#reconnect-button"),
   servicesMeta: document.querySelector("#services-meta"),
   snapshotButton: document.querySelector("#snapshot-button"),
@@ -61,6 +68,9 @@ const viewState = {
   events: [],
   eventsBusy: false,
   paused: false,
+  policyBusy: false,
+  policyDirty: false,
+  policyState: null,
   serviceBusy: new Set(),
   serviceStates: {},
   streamLoaded: false,
@@ -331,6 +341,90 @@ async function updateService(serviceId, active) {
     if (viewState.serviceStates[serviceId]) renderService(serviceId, viewState.serviceStates[serviceId]);
   }
   await refreshServices();
+}
+
+function setPolicyBusy(busy) {
+  viewState.policyBusy = busy;
+  elements.quietHoursToggle.disabled = busy || viewState.policyState == null;
+  elements.quietHoursStart.disabled = busy || viewState.policyState == null;
+  elements.quietHoursEnd.disabled = busy || viewState.policyState == null;
+  elements.quietHoursApply.disabled = busy || !viewState.policyDirty;
+}
+
+function policyScheduleLabel(policy) {
+  if (policy.quiet_hours_start === policy.quiet_hours_end) return "all day";
+  return `${policy.quiet_hours_start} - ${policy.quiet_hours_end}`;
+}
+
+function renderPolicy(policy, message = null) {
+  viewState.policyState = policy;
+  viewState.policyDirty = false;
+  elements.quietHoursToggle.checked = policy.quiet_hours_enabled;
+  elements.quietHoursStart.value = policy.quiet_hours_start;
+  elements.quietHoursEnd.value = policy.quiet_hours_end;
+  const schedule = policyScheduleLabel(policy);
+  if (message) {
+    elements.quietHoursDetail.textContent = message;
+  } else if (!policy.quiet_hours_enabled) {
+    elements.quietHoursDetail.textContent = `Off / schedule ${schedule} / ${policy.timezone}`;
+  } else if (policy.quiet_now) {
+    elements.quietHoursDetail.textContent = `Quiet now / ${schedule} / ${policy.timezone}`;
+  } else {
+    elements.quietHoursDetail.textContent = `Scheduled ${schedule} / ${policy.timezone}`;
+  }
+  elements.quietHoursRow.dataset.state = policy.quiet_hours_enabled
+    ? (policy.quiet_now ? "paused" : "active")
+    : "inactive";
+  setPolicyBusy(false);
+}
+
+function markPolicyDirty() {
+  const policy = viewState.policyState;
+  if (!policy) return;
+  viewState.policyDirty = (
+    elements.quietHoursToggle.checked !== policy.quiet_hours_enabled
+    || elements.quietHoursStart.value !== policy.quiet_hours_start
+    || elements.quietHoursEnd.value !== policy.quiet_hours_end
+  );
+  if (viewState.policyDirty) elements.quietHoursDetail.textContent = "Unsaved schedule changes";
+  else renderPolicy(policy);
+  setPolicyBusy(false);
+}
+
+async function refreshPolicy(force = false) {
+  if (viewState.policyBusy || (viewState.policyDirty && !force)) return;
+  setPolicyBusy(true);
+  try {
+    renderPolicy(await requestJSON("/api/policy"));
+  } catch (error) {
+    viewState.policyState = null;
+    viewState.policyDirty = false;
+    elements.quietHoursRow.dataset.state = "unavailable";
+    elements.quietHoursDetail.textContent = error.message;
+    setPolicyBusy(false);
+  }
+}
+
+async function applyPolicy(event) {
+  event.preventDefault();
+  if (!viewState.policyDirty || viewState.policyBusy) return;
+  setPolicyBusy(true);
+  elements.quietHoursDetail.textContent = "Applying alert schedule";
+  try {
+    const policy = await requestJSON("/api/policy", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        quiet_hours_enabled: elements.quietHoursToggle.checked,
+        quiet_hours_start: elements.quietHoursStart.value,
+        quiet_hours_end: elements.quietHoursEnd.value,
+      }),
+    });
+    renderPolicy(policy, "Alert schedule applied");
+  } catch (error) {
+    elements.quietHoursDetail.textContent = error.message;
+    setPolicyBusy(false);
+  }
 }
 
 function setCameraMessage(message, state = "idle") {
@@ -620,6 +714,10 @@ elements.reconnectButton.addEventListener("click", startStream);
 elements.snapshotButton.addEventListener("click", saveSnapshot);
 elements.fullscreenButton.addEventListener("click", toggleFullscreen);
 elements.cameraRefreshButton.addEventListener("click", () => refreshCameraState("Controls refreshed", true));
+elements.quietHoursForm.addEventListener("submit", applyPolicy);
+[elements.quietHoursToggle, elements.quietHoursStart, elements.quietHoursEnd].forEach((input) => {
+  input.addEventListener("change", markPolicyDirty);
+});
 eventRangeButtons.forEach((button) => {
   button.addEventListener("click", () => selectEventWindow(button.dataset.eventWindow));
 });
@@ -651,11 +749,13 @@ document.addEventListener("fullscreenchange", () => {
 startStream();
 refreshStatus();
 refreshServices();
+refreshPolicy();
 refreshEvents();
 refreshCameraState();
 updateClock();
 setInterval(refreshStatus, 10000);
 setInterval(refreshServices, 10000);
+setInterval(refreshPolicy, 30000);
 setInterval(() => {
   if (viewState.events.length <= 12) refreshEvents();
 }, 30000);

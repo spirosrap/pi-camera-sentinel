@@ -24,6 +24,7 @@ from . import __version__
 from .camera import apply_profile, camera_state, set_controls
 from .config import Settings
 from .health import disk_status, recent_undervoltage_seen
+from .policy import AlertPolicy, load_alert_policy, save_alert_policy
 from .services import service_state, set_service_active
 
 
@@ -289,6 +290,7 @@ class DashboardApplication:
         self._undervoltage: bool | None = None
         self._undervoltage_at = 0.0
         self._camera_lock = threading.RLock()
+        self._policy_lock = threading.RLock()
         self._service_lock = threading.RLock()
 
     def status(self) -> dict:
@@ -331,6 +333,18 @@ class DashboardApplication:
     def update_camera_controls(self, values: dict[str, int]) -> dict[str, object]:
         with self._camera_lock:
             return set_controls(self.settings.camera_device, values)
+
+    def alert_policy(self) -> dict[str, object]:
+        with self._policy_lock:
+            policy = load_alert_policy(self.settings.policy_file)
+            return policy.to_dict(self.settings.timezone)
+
+    def update_alert_policy(self, payload: dict) -> dict[str, object]:
+        with self._policy_lock:
+            policy = AlertPolicy.from_dict(payload)
+            state = policy.to_dict(self.settings.timezone)
+            save_alert_policy(self.settings.policy_file, policy)
+            return state
 
     def services(self) -> dict[str, dict[str, object]]:
         with self._service_lock:
@@ -433,6 +447,8 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                 self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
         elif path == "/api/camera":
             self.send_camera_state()
+        elif path == "/api/policy":
+            self.send_policy_state()
         elif path == "/api/services":
             self.send_json({"services": self.app.services()})
         elif path == "/healthz":
@@ -472,6 +488,8 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                 self.send_json({"error": "controls must be an object"}, HTTPStatus.BAD_REQUEST)
                 return
             self.run_camera_action(lambda: self.app.update_camera_controls(controls))
+        elif path == "/api/policy":
+            self.run_policy_action(lambda: self.app.update_alert_policy(payload))
         elif path.startswith("/api/services/"):
             service_id = path.removeprefix("/api/services/")
             active = payload.get("active")
@@ -503,6 +521,13 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
     def send_camera_state(self) -> None:
         self.run_camera_action(self.app.camera)
 
+    def send_policy_state(self) -> None:
+        try:
+            self.send_json(self.app.alert_policy())
+        except (OSError, ValueError) as exc:
+            LOG.warning("alert policy read failed: %s", exc)
+            self.send_json({"error": "alert policy is unavailable"}, HTTPStatus.SERVICE_UNAVAILABLE)
+
     def run_camera_action(self, action: Callable[[], dict[str, object]]) -> None:
         try:
             self.send_json(action())
@@ -520,6 +545,15 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         except (OSError, subprocess.SubprocessError) as exc:
             LOG.warning("service control action failed: %s", exc)
             self.send_json({"error": "service control is unavailable"}, HTTPStatus.SERVICE_UNAVAILABLE)
+
+    def run_policy_action(self, action: Callable[[], dict[str, object]]) -> None:
+        try:
+            self.send_json(action())
+        except ValueError as exc:
+            self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+        except OSError as exc:
+            LOG.warning("alert policy write failed: %s", exc)
+            self.send_json({"error": "alert policy is unavailable"}, HTTPStatus.SERVICE_UNAVAILABLE)
 
     def serve_static(self, name: str) -> None:
         target = (STATIC_DIR / name).resolve()

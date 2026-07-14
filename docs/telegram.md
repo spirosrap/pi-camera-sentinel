@@ -51,3 +51,16 @@ For busy scenes, increase:
 ```text
 SENTINEL_CHANGED_RATIO=0.05
 ```
+
+## Quiet Hours
+
+The private dashboard can enable a daily quiet-hours schedule. Motion detected during that window is still saved to the local event archive, but Telegram photos, messages, and clips are suppressed.
+
+Set the schedule timezone in `/etc/pi-camera-sentinel.env`:
+
+```text
+SENTINEL_TIMEZONE=Europe/Athens
+SENTINEL_POLICY_FILE=/var/lib/pi-camera-sentinel/alert-policy.json
+```
+
+Schedules can cross midnight, such as `22:00` until `07:00`. Matching start and end times mean quiet mode lasts all day. If the policy file cannot be read or validated, notification delivery remains enabled.

@@ -11,6 +11,7 @@ This project is intentionally small: no cloud camera account, no public port for
 - Optionally exposes the feed privately through Tailscale Serve.
 - Watches snapshots for motion using frame differencing.
 - Sends Telegram photo alerts on motion.
+- Supports timezone-aware Telegram quiet hours while continuing to archive motion.
 - Can attach short video clips if enabled.
 - Provides camera profiles for common USB webcam exposure issues.
 - Can automatically switch between day and low-light exposure profiles.
@@ -114,10 +115,11 @@ The `pi-camera-sentinel serve` command provides a small same-origin web app on p
 - current frame age, resolution, dropped-frame count, and exposure level
 - camera, power, temperature, uptime, and storage status
 - motion-alert and exposure-recovery state with pause and resume toggles
+- quiet-hours schedule controls for Telegram notifications
 - camera profiles plus safe manual exposure, color, gain, sharpness, and white-balance controls
 - retained motion snapshots with 24-hour, 7-day, and all-time filters
 - archive totals and paginated access to older captures
-- `/healthz`, `/api/status`, and `/api/camera` endpoints for monitoring and control
+- `/healthz`, `/api/status`, `/api/camera`, and `/api/policy` endpoints for monitoring and control
 
 The event API at `/api/events` accepts a validated `window` (`24h`, `7d`, or `all`), a page `limit`, and an optional `before` cursor. Responses include retained-file counts and storage totals as well as the current page.
 
@@ -126,6 +128,8 @@ The server proxies `/stream` and `/snapshot` to `ustreamer`, which keeps the raw
 Camera writes accept only known V4L2 controls and integer values inside the device-reported range. Browser writes also require a same-origin JSON request. The dashboard deliberately caps manual gain at `128` and exposure at `250` to avoid the extreme settings that can wash a C920 frame completely white.
 
 The dashboard controls the service names in `SENTINEL_MOTION_SERVICE` and `SENTINEL_EXPOSURE_SERVICE`. The defaults match the included systemd units; installations with custom unit names can override them in `/etc/pi-camera-sentinel.env`.
+
+Quiet hours are stored atomically in `SENTINEL_POLICY_FILE`. Set `SENTINEL_TIMEZONE` to an IANA timezone such as `Europe/Athens` when the schedule should not follow the Pi's system timezone. Motion captures remain in the archive during quiet hours; only Telegram delivery is suppressed.
 
 ## Camera Tuning
 

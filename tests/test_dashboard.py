@@ -8,6 +8,7 @@ from PIL import Image
 
 from pi_camera_sentinel.config import Settings
 from pi_camera_sentinel.dashboard import (
+    DashboardApplication,
     collect_dashboard_status,
     event_history,
     list_recent_events,
@@ -172,3 +173,25 @@ def test_same_origin_allows_direct_and_matching_requests():
     assert same_origin("https://camera.example", "camera.example") is True
     assert same_origin("https://other.example", "camera.example") is False
     assert same_origin("null", "camera.example") is False
+
+
+def test_dashboard_alert_policy_round_trip(tmp_path):
+    settings = replace(
+        dashboard_settings(tmp_path),
+        policy_file=tmp_path / "alert-policy.json",
+        timezone="Europe/Athens",
+    )
+    app = DashboardApplication(settings)
+
+    assert app.alert_policy()["quiet_hours_enabled"] is False
+    updated = app.update_alert_policy(
+        {
+            "quiet_hours_enabled": True,
+            "quiet_hours_start": "23:00",
+            "quiet_hours_end": "06:30",
+        }
+    )
+
+    assert updated["quiet_hours_enabled"] is True
+    assert updated["timezone"] == "Europe/Athens"
+    assert app.alert_policy()["quiet_hours_start"] == "23:00"

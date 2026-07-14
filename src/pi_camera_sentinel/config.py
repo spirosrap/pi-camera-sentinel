@@ -5,29 +5,38 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-def env_bool(name: str, default: bool) -> bool:
-    value = os.environ.get(name)
+def env_value(name: str, *aliases: str) -> str | None:
+    for candidate in (name, *aliases):
+        value = os.environ.get(candidate)
+        if value is not None:
+            return value
+    return None
+
+
+def env_bool(name: str, default: bool, *aliases: str) -> bool:
+    value = env_value(name, *aliases)
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def env_float(name: str, default: float) -> float:
-    value = os.environ.get(name)
+def env_float(name: str, default: float, *aliases: str) -> float:
+    value = env_value(name, *aliases)
     if not value:
         return default
     return float(value)
 
 
-def env_int(name: str, default: int) -> int:
-    value = os.environ.get(name)
+def env_int(name: str, default: int, *aliases: str) -> int:
+    value = env_value(name, *aliases)
     if not value:
         return default
     return int(value)
 
 
-def env_str(name: str, default: str) -> str:
-    return os.environ.get(name, default).strip()
+def env_str(name: str, default: str, *aliases: str) -> str:
+    value = env_value(name, *aliases)
+    return default.strip() if value is None else value.strip()
 
 
 @dataclass(frozen=True)
@@ -71,29 +80,31 @@ class Settings:
     dashboard_status_cache_seconds: float
     motion_service: str
     exposure_service: str
+    policy_file: Path
+    timezone: str
 
     @classmethod
     def from_env(cls) -> "Settings":
         return cls(
             telegram_token=env_str("TELEGRAM_BOT_TOKEN", ""),
             telegram_chat_id=env_str("TELEGRAM_CHAT_ID", ""),
-            snapshot_url=env_str("SENTINEL_SNAPSHOT_URL", "http://127.0.0.1:8080/snapshot"),
-            stream_url=env_str("SENTINEL_STREAM_URL", "http://127.0.0.1:8080/stream"),
-            feed_url=env_str("SENTINEL_FEED_URL", ""),
-            output_dir=Path(env_str("SENTINEL_OUTPUT_DIR", "/var/lib/pi-camera-sentinel")),
-            poll_seconds=env_float("SENTINEL_POLL_SECONDS", 1.0),
-            cooldown_seconds=env_float("SENTINEL_COOLDOWN_SECONDS", 60.0),
-            diff_threshold=env_int("SENTINEL_DIFF_THRESHOLD", 25),
-            changed_ratio=env_float("SENTINEL_CHANGED_RATIO", 0.035),
-            min_motion_frames=env_int("SENTINEL_MIN_FRAMES", 2),
-            resize_width=env_int("SENTINEL_RESIZE_WIDTH", 160),
-            resize_height=env_int("SENTINEL_RESIZE_HEIGHT", 90),
-            http_timeout=env_float("SENTINEL_HTTP_TIMEOUT", 8.0),
-            send_photo=env_bool("SENTINEL_SEND_PHOTO", True),
-            send_video=env_bool("SENTINEL_SEND_VIDEO", False),
-            video_seconds=env_int("SENTINEL_VIDEO_SECONDS", 5),
-            video_fps=env_int("SENTINEL_VIDEO_FPS", 10),
-            retention_files=env_int("SENTINEL_RETENTION_FILES", 200),
+            snapshot_url=env_str("SENTINEL_SNAPSHOT_URL", "http://127.0.0.1:8080/snapshot", "MOTION_SNAPSHOT_URL"),
+            stream_url=env_str("SENTINEL_STREAM_URL", "http://127.0.0.1:8080/stream", "MOTION_STREAM_URL"),
+            feed_url=env_str("SENTINEL_FEED_URL", "", "MOTION_FEED_URL"),
+            output_dir=Path(env_str("SENTINEL_OUTPUT_DIR", "/var/lib/pi-camera-sentinel", "MOTION_OUTPUT_DIR")),
+            poll_seconds=env_float("SENTINEL_POLL_SECONDS", 1.0, "MOTION_POLL_SECONDS"),
+            cooldown_seconds=env_float("SENTINEL_COOLDOWN_SECONDS", 60.0, "MOTION_COOLDOWN_SECONDS"),
+            diff_threshold=env_int("SENTINEL_DIFF_THRESHOLD", 25, "MOTION_DIFF_THRESHOLD"),
+            changed_ratio=env_float("SENTINEL_CHANGED_RATIO", 0.035, "MOTION_CHANGED_RATIO"),
+            min_motion_frames=env_int("SENTINEL_MIN_FRAMES", 2, "MOTION_MIN_FRAMES"),
+            resize_width=env_int("SENTINEL_RESIZE_WIDTH", 160, "MOTION_RESIZE_WIDTH"),
+            resize_height=env_int("SENTINEL_RESIZE_HEIGHT", 90, "MOTION_RESIZE_HEIGHT"),
+            http_timeout=env_float("SENTINEL_HTTP_TIMEOUT", 8.0, "MOTION_HTTP_TIMEOUT"),
+            send_photo=env_bool("SENTINEL_SEND_PHOTO", True, "MOTION_SEND_PHOTO"),
+            send_video=env_bool("SENTINEL_SEND_VIDEO", False, "MOTION_SEND_VIDEO"),
+            video_seconds=env_int("SENTINEL_VIDEO_SECONDS", 5, "MOTION_VIDEO_SECONDS"),
+            video_fps=env_int("SENTINEL_VIDEO_FPS", 10, "MOTION_VIDEO_FPS"),
+            retention_files=env_int("SENTINEL_RETENTION_FILES", 200, "MOTION_RETENTION_FILES"),
             camera_device=env_str("SENTINEL_CAMERA_DEVICE", "/dev/video0"),
             exposure_watchdog_interval=env_float("SENTINEL_EXPOSURE_WATCHDOG_INTERVAL", 60.0),
             exposure_settle_seconds=env_float("SENTINEL_EXPOSURE_SETTLE_SECONDS", 8.0),
@@ -117,6 +128,14 @@ class Settings:
                 "SENTINEL_EXPOSURE_SERVICE",
                 "pi-camera-exposure-watchdog.service",
             ),
+            policy_file=Path(
+                env_str(
+                    "SENTINEL_POLICY_FILE",
+                    "/var/lib/pi-camera-sentinel/alert-policy.json",
+                    "MOTION_POLICY_FILE",
+                )
+            ),
+            timezone=env_str("SENTINEL_TIMEZONE", "local", "MOTION_TIMEZONE"),
         )
 
     def missing_telegram_fields(self) -> list[str]:

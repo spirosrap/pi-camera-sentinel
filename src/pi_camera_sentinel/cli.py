@@ -17,6 +17,7 @@ from .dashboard import serve_dashboard
 from .exposure import exposure_watchdog_step
 from .health import check_health
 from .motion import changed_pixel_ratio, fetch_snapshot, normalize_image, summarize_ratios
+from .policy import load_alert_policy
 from .telegram import get_chat_ids, send_message, send_photo, send_video
 
 
@@ -92,6 +93,17 @@ def handle_motion_event(settings: Settings, snapshot: bytes, ratio: float) -> No
     photo_path.write_bytes(snapshot)
     event_caption = caption(settings, ratio)
     LOG.info("motion event: ratio=%.4f photo=%s", ratio, photo_path)
+
+    try:
+        quiet_now = load_alert_policy(settings.policy_file).quiet_now(settings.timezone)
+    except (OSError, ValueError) as exc:
+        LOG.warning("could not evaluate alert policy; notifications remain enabled: %s", exc)
+        quiet_now = False
+
+    if quiet_now:
+        LOG.info("Telegram notification suppressed by quiet hours; capture remains archived")
+        cleanup_old_files(settings.output_dir, settings.retention_files)
+        return
 
     if settings.send_photo:
         send_photo(settings, photo_path, event_caption)

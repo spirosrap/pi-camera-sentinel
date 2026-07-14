@@ -490,6 +490,58 @@ main {
   gap: 0;
 }
 
+.quiet-hours-form {
+  display: flex;
+  align-items: flex-end;
+  flex: 0 0 auto;
+  gap: 12px;
+}
+
+.quiet-hours-toggle {
+  min-height: 38px;
+  margin-right: 4px;
+}
+
+.clock-control {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.clock-control input {
+  width: 112px;
+  min-height: 38px;
+  padding: 0 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  color: var(--ink);
+  background: var(--surface);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.clock-control input:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--focus) 30%, transparent);
+  outline-offset: 2px;
+}
+
+.quiet-hours-form button:not(:disabled) {
+  border-color: var(--ink);
+  color: var(--surface);
+  background: var(--ink);
+}
+
+.quiet-hours-form button:disabled,
+.clock-control input:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .visually-hidden {
   position: absolute;
   width: 1px;
@@ -860,6 +912,17 @@ dialog time {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .policy-row {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .quiet-hours-form {
+    justify-content: flex-end;
+    padding-left: 23px;
+  }
+
   .range-control:nth-child(4n) {
     border-right: 1px solid var(--line);
   }
@@ -1080,6 +1143,22 @@ dialog time {
 
   .service-action strong {
     text-align: left;
+  }
+
+  .quiet-hours-form {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding-left: 23px;
+  }
+
+  .quiet-hours-toggle,
+  .quiet-hours-form button {
+    grid-column: 1 / -1;
+  }
+
+  .clock-control input,
+  .quiet-hours-form button {
+    width: 100%;
   }
 }
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.0 - 2026-07-14
+
+- Add timezone-aware Telegram quiet hours with overnight and all-day schedules.
+- Add dashboard controls for enabling and editing the alert schedule.
+- Continue archiving motion captures while quiet hours suppress notification delivery.
+- Persist alert policy changes atomically and fail open when policy evaluation fails.
+- Accept legacy `MOTION_*` environment names so standalone notifier deployments can migrate to the maintained monitor.
+
 ## 0.5.0 - 2026-07-14
 
 - Add 24-hour, 7-day, and all-time motion-history filters.
