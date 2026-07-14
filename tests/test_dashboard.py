@@ -195,3 +195,19 @@ def test_dashboard_alert_policy_round_trip(tmp_path):
     assert updated["quiet_hours_enabled"] is True
     assert updated["timezone"] == "Europe/Athens"
     assert app.alert_policy()["quiet_hours_start"] == "23:00"
+
+
+def test_dashboard_motion_masks_round_trip(tmp_path):
+    settings = replace(
+        dashboard_settings(tmp_path),
+        mask_file=tmp_path / "motion-masks.json",
+    )
+    app = DashboardApplication(settings)
+
+    assert app.motion_masks()["regions"] == []
+    updated = app.update_motion_masks(
+        {"regions": [{"x": 0.1, "y": 0.2, "width": 0.3, "height": 0.4}]}
+    )
+
+    assert updated["regions"] == [{"x": 0.1, "y": 0.2, "width": 0.3, "height": 0.4}]
+    assert app.motion_masks() == updated

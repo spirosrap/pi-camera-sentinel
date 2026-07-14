@@ -12,6 +12,7 @@
 - dashboard motion-alert and exposure-watchdog state with pause controls
 - filterable event history with archive totals and pagination
 - timezone-aware Telegram quiet hours with dashboard controls
+- masked zones for motion detection with dashboard editor
 - camera tuning profiles
 - exposure watchdog for black/washed-out frames
 - systemd installer
@@ -19,7 +20,6 @@
 ## Good Next Features
 
 - optional Home Assistant webhook output
-- masked zones for motion detection
 - alert batching
 
 ## Non-Goals For Now

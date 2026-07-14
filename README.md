@@ -10,6 +10,7 @@ This project is intentionally small: no cloud camera account, no public port for
 - Presents a private, responsive dashboard with live status and filterable motion history.
 - Optionally exposes the feed privately through Tailscale Serve.
 - Watches snapshots for motion using frame differencing.
+- Supports dashboard-drawn ignored areas for excluding noisy motion zones.
 - Sends Telegram photo alerts on motion.
 - Supports timezone-aware Telegram quiet hours while continuing to archive motion.
 - Can attach short video clips if enabled.
@@ -116,10 +117,11 @@ The `pi-camera-sentinel serve` command provides a small same-origin web app on p
 - camera, power, temperature, uptime, and storage status
 - motion-alert and exposure-recovery state with pause and resume toggles
 - quiet-hours schedule controls for Telegram notifications
+- a pointer- and touch-friendly editor for ignored motion areas
 - camera profiles plus safe manual exposure, color, gain, sharpness, and white-balance controls
 - retained motion snapshots with 24-hour, 7-day, and all-time filters
 - archive totals and paginated access to older captures
-- `/healthz`, `/api/status`, `/api/camera`, and `/api/policy` endpoints for monitoring and control
+- `/healthz`, `/api/status`, `/api/camera`, `/api/policy`, and `/api/masks` endpoints for monitoring and control
 
 The event API at `/api/events` accepts a validated `window` (`24h`, `7d`, or `all`), a page `limit`, and an optional `before` cursor. Responses include retained-file counts and storage totals as well as the current page.
 
@@ -130,6 +132,8 @@ Camera writes accept only known V4L2 controls and integer values inside the devi
 The dashboard controls the service names in `SENTINEL_MOTION_SERVICE` and `SENTINEL_EXPOSURE_SERVICE`. The defaults match the included systemd units; installations with custom unit names can override them in `/etc/pi-camera-sentinel.env`.
 
 Quiet hours are stored atomically in `SENTINEL_POLICY_FILE`. Set `SENTINEL_TIMEZONE` to an IANA timezone such as `Europe/Athens` when the schedule should not follow the Pi's system timezone. Motion captures remain in the archive during quiet hours; only Telegram delivery is suppressed.
+
+Motion masks are stored atomically in `SENTINEL_MASK_FILE`, which defaults to `motion-masks.json` beside the alert policy. The dashboard supports up to eight normalized rectangles. Masked areas remain visible in the feed and saved captures; they are excluded only from motion detection. The running monitor reloads changes within five seconds.
 
 ## Camera Tuning
 
@@ -176,6 +180,8 @@ pi-camera-sentinel sample 10
 ```
 
 If the scene is noisy, increase `SENTINEL_CHANGED_RATIO`. If small motion is missed, lower it.
+
+Use **Motion zones** in the dashboard to exclude areas such as moving plants, reflections, clocks, or status lights. Add and apply rectangles over a current snapshot; no service restart is required.
 
 ## Security Notes
 

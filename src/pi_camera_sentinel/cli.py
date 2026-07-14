@@ -16,6 +16,7 @@ from .config import Settings
 from .dashboard import serve_dashboard
 from .exposure import exposure_watchdog_step
 from .health import check_health
+from .masks import MotionMask, load_motion_masks
 from .motion import changed_pixel_ratio, fetch_snapshot, normalize_image, summarize_ratios
 from .policy import load_alert_policy
 from .telegram import get_chat_ids, send_message, send_photo, send_video
@@ -54,6 +55,25 @@ def cleanup_old_files(directory: Path, max_files: int) -> None:
             old.unlink()
         except OSError as exc:
             LOG.debug("could not remove old file %s: %s", old, exc)
+
+
+def refresh_motion_masks(
+    settings: Settings,
+    current: tuple[MotionMask, ...],
+    previous_error: str | None,
+) -> tuple[tuple[MotionMask, ...], str | None]:
+    try:
+        loaded = load_motion_masks(settings.mask_file)
+    except (OSError, ValueError) as exc:
+        message = str(exc)
+        if message != previous_error:
+            LOG.warning("could not reload motion masks; keeping last valid set: %s", message)
+        return current, message
+    if previous_error is not None:
+        LOG.info("motion mask configuration is readable again")
+    if loaded != current:
+        LOG.info("motion masks updated count=%s", len(loaded))
+    return loaded, None
 
 
 def record_video_clip(settings: Settings, path: Path) -> bool:
@@ -128,6 +148,8 @@ def cmd_monitor(settings: Settings, _args: argparse.Namespace) -> int:
     previous = None
     consecutive = 0
     last_alert = 0.0
+    masks, mask_error = refresh_motion_masks(settings, (), None)
+    masks_checked_at = time.monotonic()
     LOG.info(
         "monitoring %s threshold=%s ratio=%.4f min_frames=%s cooldown=%ss",
         settings.snapshot_url,
@@ -146,14 +168,21 @@ def cmd_monitor(settings: Settings, _args: argparse.Namespace) -> int:
                 time.sleep(settings.poll_seconds)
                 continue
 
-            ratio = changed_pixel_ratio(previous, current, settings.diff_threshold)
+            now = time.monotonic()
+            if now - masks_checked_at >= 5:
+                previous_masks = masks
+                masks, mask_error = refresh_motion_masks(settings, masks, mask_error)
+                masks_checked_at = now
+                if masks != previous_masks:
+                    consecutive = 0
+
+            ratio = changed_pixel_ratio(previous, current, settings.diff_threshold, masks)
             if ratio >= settings.changed_ratio:
                 consecutive += 1
                 LOG.info("motion candidate ratio=%.4f frame=%s/%s", ratio, consecutive, settings.min_motion_frames)
             else:
                 consecutive = 0
 
-            now = time.monotonic()
             if consecutive >= settings.min_motion_frames and now - last_alert >= settings.cooldown_seconds:
                 handle_motion_event(settings, snapshot, ratio)
                 last_alert = now
@@ -173,11 +202,12 @@ def cmd_sample(settings: Settings, args: argparse.Namespace) -> int:
     session = requests.Session()
     previous = None
     ratios: list[float] = []
+    masks, _mask_error = refresh_motion_masks(settings, (), None)
     for index in range(args.frames):
         _, image = fetch_snapshot(session, settings)
         current = normalize_image(image, settings)
         if previous is not None:
-            ratio = changed_pixel_ratio(previous, current, settings.diff_threshold)
+            ratio = changed_pixel_ratio(previous, current, settings.diff_threshold, masks)
             ratios.append(ratio)
             print(json.dumps({"frame": index, "changed_ratio": ratio}, sort_keys=True))
         previous = current
@@ -185,6 +215,7 @@ def cmd_sample(settings: Settings, args: argparse.Namespace) -> int:
     summary = summarize_ratios(ratios)
     summary["configured_trigger_ratio"] = settings.changed_ratio
     summary["diff_threshold"] = settings.diff_threshold
+    summary["masked_regions"] = len(masks)
     print(json.dumps(summary, sort_keys=True))
     return 0
 

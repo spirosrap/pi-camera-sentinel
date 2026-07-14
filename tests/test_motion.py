@@ -1,5 +1,6 @@
 from PIL import Image
 
+from pi_camera_sentinel.masks import MotionMask
 from pi_camera_sentinel.motion import changed_pixel_ratio, summarize_ratios
 
 
@@ -16,6 +17,17 @@ def test_changed_pixel_ratio_counts_threshold_pixels():
         current.putpixel((x, 0), 50)
 
     assert changed_pixel_ratio(previous, current, threshold=25) == 0.05
+
+
+def test_changed_pixel_ratio_excludes_masks_from_count_and_denominator():
+    previous = Image.new("L", (10, 10), color=0)
+    current = Image.new("L", (10, 10), color=0)
+    for x in range(6):
+        current.putpixel((x, 0), 50)
+
+    mask = MotionMask(x=0, y=0, width=0.5, height=1)
+
+    assert changed_pixel_ratio(previous, current, threshold=25, masks=(mask,)) == 0.02
 
 
 def test_summarize_ratios():

@@ -6,8 +6,8 @@
     <meta name="theme-color" content="#171a18">
     <meta name="color-scheme" content="light">
     <title>Pi Camera Sentinel</title>
-    <link rel="stylesheet" href="/assets/styles.css?v=0.6.1">
-    <script src="/assets/app.js?v=0.6.1" defer></script>
+    <link rel="stylesheet" href="/assets/styles.css?v=0.7.0.1">
+    <script src="/assets/app.js?v=0.7.0.1" defer></script>
   </head>
   <body>
     <header class="topbar">
@@ -17,7 +17,7 @@
           <span class="brand-kicker">Private camera</span>
           <span class="brand-name-row">
             <strong id="app-title">Pi Camera Sentinel</strong>
-            <span class="app-version" id="app-version">v0.6.1</span>
+            <span class="app-version" id="app-version">v0.7.0</span>
           </span>
         </span>
       </a>
@@ -163,6 +163,39 @@
               <button type="submit" id="quiet-hours-apply" disabled>Apply</button>
             </form>
           </article>
+        </div>
+      </section>
+
+      <section class="motion-mask-section" aria-labelledby="motion-mask-heading">
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">Detection filter</p>
+            <h2 id="motion-mask-heading">Motion zones</h2>
+          </div>
+          <p class="section-meta" id="motion-mask-meta" role="status" aria-live="polite">Loading ignored areas</p>
+        </div>
+
+        <div class="mask-editor-surface">
+          <div class="mask-editor-toolbar">
+            <div class="mask-action-group">
+              <button type="button" id="motion-mask-add" title="Draw a new ignored area on the frame">Add area</button>
+              <button type="button" id="motion-mask-remove" title="Remove the selected ignored area" disabled>Remove</button>
+              <button type="button" id="motion-mask-clear" disabled>Clear</button>
+              <button type="button" id="motion-mask-reset" disabled>Reset</button>
+            </div>
+            <button type="button" id="motion-mask-refresh" title="Refresh the editing frame">Refresh frame</button>
+          </div>
+
+          <div class="mask-preview-shell" id="motion-mask-preview-shell">
+            <img id="motion-mask-preview" alt="Current camera frame for editing ignored motion areas">
+            <canvas id="motion-mask-canvas" aria-label="Ignored motion areas"></canvas>
+            <div class="mask-preview-notice" id="motion-mask-preview-notice" role="status">Loading frame</div>
+          </div>
+
+          <div class="mask-editor-foot">
+            <p id="motion-mask-message" role="status" aria-live="polite">Reading motion masks</p>
+            <button type="button" id="motion-mask-apply" disabled>Apply masks</button>
+          </div>
         </div>
       </section>
 

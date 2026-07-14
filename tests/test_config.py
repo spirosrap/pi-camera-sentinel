@@ -4,6 +4,8 @@ from pi_camera_sentinel.config import Settings
 def test_legacy_motion_environment_aliases(monkeypatch, tmp_path):
     monkeypatch.delenv("SENTINEL_OUTPUT_DIR", raising=False)
     monkeypatch.delenv("SENTINEL_CHANGED_RATIO", raising=False)
+    monkeypatch.delenv("SENTINEL_MASK_FILE", raising=False)
+    monkeypatch.delenv("MOTION_MASK_FILE", raising=False)
     monkeypatch.setenv("MOTION_OUTPUT_DIR", str(tmp_path / "legacy"))
     monkeypatch.setenv("MOTION_CHANGED_RATIO", "0.125")
     monkeypatch.setenv("MOTION_POLICY_FILE", str(tmp_path / "policy.json"))
@@ -14,6 +16,7 @@ def test_legacy_motion_environment_aliases(monkeypatch, tmp_path):
     assert settings.output_dir == tmp_path / "legacy"
     assert settings.changed_ratio == 0.125
     assert settings.policy_file == tmp_path / "policy.json"
+    assert settings.mask_file == tmp_path / "motion-masks.json"
     assert settings.timezone == "Europe/Athens"
 
 

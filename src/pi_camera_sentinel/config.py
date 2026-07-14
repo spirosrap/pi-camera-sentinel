@@ -81,10 +81,25 @@ class Settings:
     motion_service: str
     exposure_service: str
     policy_file: Path
+    mask_file: Path
     timezone: str
 
     @classmethod
     def from_env(cls) -> "Settings":
+        policy_file = Path(
+            env_str(
+                "SENTINEL_POLICY_FILE",
+                "/var/lib/pi-camera-sentinel/alert-policy.json",
+                "MOTION_POLICY_FILE",
+            )
+        )
+        mask_file = Path(
+            env_str(
+                "SENTINEL_MASK_FILE",
+                str(policy_file.with_name("motion-masks.json")),
+                "MOTION_MASK_FILE",
+            )
+        )
         return cls(
             telegram_token=env_str("TELEGRAM_BOT_TOKEN", ""),
             telegram_chat_id=env_str("TELEGRAM_CHAT_ID", ""),
@@ -128,13 +143,8 @@ class Settings:
                 "SENTINEL_EXPOSURE_SERVICE",
                 "pi-camera-exposure-watchdog.service",
             ),
-            policy_file=Path(
-                env_str(
-                    "SENTINEL_POLICY_FILE",
-                    "/var/lib/pi-camera-sentinel/alert-policy.json",
-                    "MOTION_POLICY_FILE",
-                )
-            ),
+            policy_file=policy_file,
+            mask_file=mask_file,
             timezone=env_str("SENTINEL_TIMEZONE", "local", "MOTION_TIMEZONE"),
         )
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.0 - 2026-07-14
+
+- Add a pointer- and touch-friendly dashboard editor for ignored motion areas.
+- Persist up to eight normalized mask regions atomically beside the alert policy.
+- Exclude masked pixels from both motion-change counts and the active detection area.
+- Reload updated masks in the running detector without restarting the service.
+- Preserve the visible stream and archived captures while masks filter detection only.
+
 ## 0.6.1 - 2026-07-14
 
 - Keep automatic exposure active in the C920 low-light recovery profile.

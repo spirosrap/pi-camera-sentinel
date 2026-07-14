@@ -24,6 +24,7 @@ from . import __version__
 from .camera import apply_profile, camera_state, set_controls
 from .config import Settings
 from .health import disk_status, recent_undervoltage_seen
+from .masks import MAX_MOTION_MASKS, load_motion_masks, save_motion_masks, validate_motion_masks
 from .policy import AlertPolicy, load_alert_policy, save_alert_policy
 from .services import service_state, set_service_active
 
@@ -290,6 +291,7 @@ class DashboardApplication:
         self._undervoltage: bool | None = None
         self._undervoltage_at = 0.0
         self._camera_lock = threading.RLock()
+        self._mask_lock = threading.RLock()
         self._policy_lock = threading.RLock()
         self._service_lock = threading.RLock()
 
@@ -345,6 +347,23 @@ class DashboardApplication:
             state = policy.to_dict(self.settings.timezone)
             save_alert_policy(self.settings.policy_file, policy)
             return state
+
+    def motion_masks(self) -> dict[str, object]:
+        with self._mask_lock:
+            masks = load_motion_masks(self.settings.mask_file)
+            return {
+                "regions": [mask.to_dict() for mask in masks],
+                "max_regions": MAX_MOTION_MASKS,
+            }
+
+    def update_motion_masks(self, payload: dict) -> dict[str, object]:
+        with self._mask_lock:
+            masks = validate_motion_masks(payload.get("regions"))
+            save_motion_masks(self.settings.mask_file, masks)
+            return {
+                "regions": [mask.to_dict() for mask in masks],
+                "max_regions": MAX_MOTION_MASKS,
+            }
 
     def services(self) -> dict[str, dict[str, object]]:
         with self._service_lock:
@@ -449,6 +468,8 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             self.send_camera_state()
         elif path == "/api/policy":
             self.send_policy_state()
+        elif path == "/api/masks":
+            self.send_motion_masks_state()
         elif path == "/api/services":
             self.send_json({"services": self.app.services()})
         elif path == "/healthz":
@@ -490,6 +511,8 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             self.run_camera_action(lambda: self.app.update_camera_controls(controls))
         elif path == "/api/policy":
             self.run_policy_action(lambda: self.app.update_alert_policy(payload))
+        elif path == "/api/masks":
+            self.run_motion_masks_action(lambda: self.app.update_motion_masks(payload))
         elif path.startswith("/api/services/"):
             service_id = path.removeprefix("/api/services/")
             active = payload.get("active")
@@ -528,6 +551,13 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             LOG.warning("alert policy read failed: %s", exc)
             self.send_json({"error": "alert policy is unavailable"}, HTTPStatus.SERVICE_UNAVAILABLE)
 
+    def send_motion_masks_state(self) -> None:
+        try:
+            self.send_json(self.app.motion_masks())
+        except (OSError, ValueError) as exc:
+            LOG.warning("motion mask read failed: %s", exc)
+            self.send_json({"error": "motion masks are unavailable"}, HTTPStatus.SERVICE_UNAVAILABLE)
+
     def run_camera_action(self, action: Callable[[], dict[str, object]]) -> None:
         try:
             self.send_json(action())
@@ -554,6 +584,15 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         except OSError as exc:
             LOG.warning("alert policy write failed: %s", exc)
             self.send_json({"error": "alert policy is unavailable"}, HTTPStatus.SERVICE_UNAVAILABLE)
+
+    def run_motion_masks_action(self, action: Callable[[], dict[str, object]]) -> None:
+        try:
+            self.send_json(action())
+        except ValueError as exc:
+            self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+        except OSError as exc:
+            LOG.warning("motion mask write failed: %s", exc)
+            self.send_json({"error": "motion masks are unavailable"}, HTTPStatus.SERVICE_UNAVAILABLE)
 
     def serve_static(self, name: str) -> None:
         target = (STATIC_DIR / name).resolve()
