@@ -11,6 +11,7 @@ from pathlib import Path
 
 import requests
 
+from .batching import MotionBatch, MotionSample, validate_batch_config
 from .camera import PROFILES, apply_profile, controls_json, list_controls
 from .config import Settings
 from .dashboard import serve_dashboard
@@ -19,7 +20,7 @@ from .health import check_health
 from .masks import MotionMask, load_motion_masks
 from .motion import changed_pixel_ratio, fetch_snapshot, normalize_image, summarize_ratios
 from .policy import load_alert_policy
-from .telegram import get_chat_ids, send_message, send_photo, send_video
+from .telegram import get_chat_ids, send_media_group, send_message, send_photo, send_video
 from .webhook import deliver_webhook, webhook_payload
 
 
@@ -42,6 +43,21 @@ def caption(
     text = f"Motion detected at {current.strftime('%Y-%m-%d %H:%M:%S %Z')}"
     if ratio is not None:
         text += f"\nChanged pixels: {ratio:.1%}"
+    if settings.feed_url:
+        text += f"\nLive feed: {settings.feed_url}"
+    return text
+
+
+def batch_caption(settings: Settings, batch: MotionBatch) -> str:
+    if batch.first_captured_at is None:
+        raise ValueError("motion batch has no capture timestamp")
+    if batch.detection_count == 1:
+        return caption(settings, batch.peak_ratio, batch.first_captured_at)
+
+    duration = max(1, round(batch.duration_seconds))
+    text = f"Motion burst: {batch.detection_count} detections over {duration}s"
+    text += f"\nFirst seen: {batch.first_captured_at.strftime('%Y-%m-%d %H:%M:%S %Z')}"
+    text += f"\nPeak changed pixels: {batch.peak_ratio:.1%}"
     if settings.feed_url:
         text += f"\nLive feed: {settings.feed_url}"
     return text
@@ -111,14 +127,32 @@ def record_video_clip(settings: Settings, path: Path) -> bool:
     return path.exists() and path.stat().st_size > 0
 
 
-def handle_motion_event(settings: Settings, snapshot: bytes, ratio: float) -> None:
+def archive_motion_batch(settings: Settings, batch: MotionBatch) -> list[Path]:
     settings.output_dir.mkdir(parents=True, exist_ok=True)
-    captured_at = dt.datetime.now().astimezone()
-    stamp = captured_at.strftime("%Y%m%d-%H%M%S")
-    photo_path = settings.output_dir / f"motion-{stamp}.jpg"
-    photo_path.write_bytes(snapshot)
-    event_caption = caption(settings, ratio, captured_at)
-    LOG.info("motion event: ratio=%.4f photo=%s", ratio, photo_path)
+    paths: list[Path] = []
+    for index, sample in enumerate(batch.samples):
+        stamp = sample.captured_at.strftime("%Y%m%d-%H%M%S-%f")
+        path = settings.output_dir / f"motion-{stamp}.jpg"
+        if path.exists():
+            path = settings.output_dir / f"motion-{stamp}-{index + 1}.jpg"
+        path.write_bytes(sample.snapshot)
+        paths.append(path)
+    return paths
+
+
+def handle_motion_batch(settings: Settings, batch: MotionBatch) -> None:
+    if not batch.samples or batch.first_captured_at is None:
+        raise ValueError("motion batch contains no samples")
+
+    photo_paths = archive_motion_batch(settings, batch)
+    event_caption = batch_caption(settings, batch)
+    LOG.info(
+        "motion batch: detections=%s photos=%s peak_ratio=%.4f duration=%.1fs",
+        batch.detection_count,
+        len(photo_paths),
+        batch.peak_ratio,
+        batch.duration_seconds,
+    )
 
     try:
         quiet_now = load_alert_policy(settings.policy_file).quiet_now(settings.timezone)
@@ -128,14 +162,18 @@ def handle_motion_event(settings: Settings, snapshot: bytes, ratio: float) -> No
 
     try:
         if quiet_now:
-            LOG.info("Telegram notification suppressed by quiet hours; capture remains archived")
+            LOG.info("Telegram batch suppressed by quiet hours; captures remain archived")
         else:
             if settings.send_photo:
-                send_photo(settings, photo_path, event_caption)
+                if len(photo_paths) > 1:
+                    send_media_group(settings, photo_paths, event_caption)
+                else:
+                    send_photo(settings, photo_paths[0], event_caption)
             else:
                 send_message(settings, event_caption)
 
             if settings.send_video:
+                stamp = batch.first_captured_at.strftime("%Y%m%d-%H%M%S-%f")
                 video_path = settings.output_dir / f"motion-{stamp}.mp4"
                 if record_video_clip(settings, video_path):
                     send_video(settings, video_path, f"Motion clip\n{settings.feed_url}")
@@ -147,9 +185,12 @@ def handle_motion_event(settings: Settings, snapshot: bytes, ratio: float) -> No
                     webhook_payload(
                         settings,
                         event="motion",
-                        captured_at=captured_at,
-                        ratio=ratio,
-                        capture_path=photo_path,
+                        captured_at=batch.first_captured_at,
+                        ratio=batch.peak_ratio,
+                        capture_path=photo_paths[0],
+                        batch_count=batch.detection_count,
+                        batch_duration_seconds=batch.duration_seconds,
+                        batch_capture_paths=photo_paths,
                     ),
                 )
                 LOG.info("Home Assistant webhook delivered status=%s", status_code)
@@ -158,29 +199,55 @@ def handle_motion_event(settings: Settings, snapshot: bytes, ratio: float) -> No
         cleanup_old_files(settings.output_dir, settings.retention_files)
 
 
+def handle_motion_event(settings: Settings, snapshot: bytes, ratio: float) -> None:
+    sample = MotionSample(snapshot, ratio, dt.datetime.now().astimezone())
+    batch = MotionBatch.start(
+        sample,
+        now=time.monotonic(),
+        window_seconds=0,
+        max_photos=1,
+    )
+    handle_motion_batch(settings, batch)
+
+
 def cmd_monitor(settings: Settings, _args: argparse.Namespace) -> int:
     missing = settings.missing_telegram_fields()
     if missing:
         LOG.error("missing Telegram config fields: %s", ", ".join(missing))
+        return 2
+    try:
+        validate_batch_config(settings.alert_batch_seconds, settings.alert_batch_max_photos)
+    except ValueError as exc:
+        LOG.error("invalid alert batching configuration: %s", exc)
         return 2
 
     session = requests.Session()
     previous = None
     consecutive = 0
     last_alert = 0.0
+    batch: MotionBatch | None = None
     masks, mask_error = refresh_motion_masks(settings, (), None)
     masks_checked_at = time.monotonic()
     LOG.info(
-        "monitoring %s threshold=%s ratio=%.4f min_frames=%s cooldown=%ss",
+        "monitoring %s threshold=%s ratio=%.4f min_frames=%s cooldown=%ss batch=%ss/%s photos",
         settings.snapshot_url,
         settings.diff_threshold,
         settings.changed_ratio,
         settings.min_motion_frames,
         settings.cooldown_seconds,
+        settings.alert_batch_seconds,
+        settings.alert_batch_max_photos,
     )
 
     while True:
         try:
+            now = time.monotonic()
+            if batch is not None and batch.due(now):
+                ready_batch = batch
+                batch = None
+                last_alert = now
+                handle_motion_batch(settings, ready_batch)
+
             snapshot, image = fetch_snapshot(session, settings)
             current = normalize_image(image, settings)
             if previous is None:
@@ -203,14 +270,43 @@ def cmd_monitor(settings: Settings, _args: argparse.Namespace) -> int:
             else:
                 consecutive = 0
 
-            if consecutive >= settings.min_motion_frames and now - last_alert >= settings.cooldown_seconds:
-                handle_motion_event(settings, snapshot, ratio)
-                last_alert = now
+            if consecutive >= settings.min_motion_frames:
+                sample = MotionSample(snapshot, ratio, dt.datetime.now().astimezone())
+                if batch is not None:
+                    batch.add(sample)
+                    LOG.info(
+                        "motion added to batch detection=%s photos=%s/%s",
+                        batch.detection_count,
+                        len(batch.samples),
+                        batch.max_photos,
+                    )
+                elif now - last_alert >= settings.cooldown_seconds:
+                    if settings.alert_batch_seconds == 0:
+                        handle_motion_event(settings, snapshot, ratio)
+                        last_alert = now
+                    else:
+                        batch = MotionBatch.start(
+                            sample,
+                            now=now,
+                            window_seconds=settings.alert_batch_seconds,
+                            max_photos=settings.alert_batch_max_photos,
+                        )
+                        LOG.info(
+                            "motion batch started window=%ss photo_limit=%s",
+                            settings.alert_batch_seconds,
+                            settings.alert_batch_max_photos,
+                        )
                 consecutive = 0
 
             previous = current
             time.sleep(settings.poll_seconds)
         except KeyboardInterrupt:
+            if batch is not None:
+                LOG.info("flushing pending motion batch detections=%s", batch.detection_count)
+                try:
+                    handle_motion_batch(settings, batch)
+                except Exception:
+                    LOG.exception("pending motion batch delivery failed during shutdown")
             LOG.info("stopping")
             return 0
         except Exception:

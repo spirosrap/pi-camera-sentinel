@@ -36,3 +36,13 @@ def test_home_assistant_webhook_configuration(monkeypatch):
 
     assert settings.webhook_url == "https://ha.example/api/webhook/id"
     assert settings.webhook_timeout == 2.5
+
+
+def test_alert_batch_configuration(monkeypatch):
+    monkeypatch.setenv("SENTINEL_ALERT_BATCH_SECONDS", "12.5")
+    monkeypatch.setenv("SENTINEL_ALERT_BATCH_MAX_PHOTOS", "6")
+
+    settings = Settings.from_env()
+
+    assert settings.alert_batch_seconds == 12.5
+    assert settings.alert_batch_max_photos == 6

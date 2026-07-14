@@ -57,6 +57,8 @@ class Settings:
     http_timeout: float
     send_photo: bool
     send_video: bool
+    alert_batch_seconds: float
+    alert_batch_max_photos: int
     video_seconds: int
     video_fps: int
     retention_files: int
@@ -119,6 +121,8 @@ class Settings:
             http_timeout=env_float("SENTINEL_HTTP_TIMEOUT", 8.0, "MOTION_HTTP_TIMEOUT"),
             send_photo=env_bool("SENTINEL_SEND_PHOTO", True, "MOTION_SEND_PHOTO"),
             send_video=env_bool("SENTINEL_SEND_VIDEO", False, "MOTION_SEND_VIDEO"),
+            alert_batch_seconds=env_float("SENTINEL_ALERT_BATCH_SECONDS", 8.0),
+            alert_batch_max_photos=env_int("SENTINEL_ALERT_BATCH_MAX_PHOTOS", 4),
             video_seconds=env_int("SENTINEL_VIDEO_SECONDS", 5, "MOTION_VIDEO_SECONDS"),
             video_fps=env_int("SENTINEL_VIDEO_FPS", 10, "MOTION_VIDEO_FPS"),
             retention_files=env_int("SENTINEL_RETENTION_FILES", 200, "MOTION_RETENTION_FILES"),

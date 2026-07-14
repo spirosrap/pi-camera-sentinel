@@ -37,6 +37,17 @@ If this works, start the motion service:
 sudo systemctl enable --now pi-camera-motion.service
 ```
 
+## Batch Nearby Motion
+
+By default, nearby detections are collected for eight seconds and sent as one Telegram album with up to four representative frames:
+
+```text
+SENTINEL_ALERT_BATCH_SECONDS=8
+SENTINEL_ALERT_BATCH_MAX_PHOTOS=4
+```
+
+The caption reports the full detection count, batch duration, and peak changed-pixel ratio even when the photo limit is reached. The first frame is kept and the newest frame continually replaces the final slot, so the album shows how the scene developed. Set the batch window to `0` to restore immediate single-photo alerts.
+
 ## Avoid Spam
 
 Use cooldowns and consecutive-frame checks:
@@ -45,6 +56,8 @@ Use cooldowns and consecutive-frame checks:
 SENTINEL_MIN_FRAMES=2
 SENTINEL_COOLDOWN_SECONDS=60
 ```
+
+The cooldown begins when a completed batch is delivered.
 
 For busy scenes, increase:
 

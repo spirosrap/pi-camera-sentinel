@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.0 - 2026-07-14
+
+- Group nearby motion detections into one Telegram media album.
+- Keep the first and latest representative frames while reporting the full burst count.
+- Flush pending batches when the camera is unavailable or the service stops.
+- Include batch counts, duration, captures, and private event links in Home Assistant payloads.
+- Show the active batch window and photo limit in the private dashboard.
+- Preserve immediate single-photo delivery when batching is disabled.
+
 ## 0.8.0 - 2026-07-14
 
 - Add optional Home Assistant-compatible JSON webhooks for motion events.

@@ -69,6 +69,11 @@ def test_collect_dashboard_status_for_online_feed(tmp_path):
     assert result["feed"]["height"] == 720
     assert result["feed"]["mean_luma"] == 120.0
     assert result["feed"]["dropped_frames"] == 0
+    assert result["automation"]["alert_batching"] == {
+        "enabled": True,
+        "window_seconds": 8.0,
+        "max_photos": 4,
+    }
     assert result["integrations"]["home_assistant"]["configured"] is False
 
 

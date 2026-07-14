@@ -157,6 +157,13 @@ def collect_dashboard_status(
             "device": settings.camera_device,
             "exists": camera_exists,
         },
+        "automation": {
+            "alert_batching": {
+                "enabled": settings.alert_batch_seconds > 0,
+                "window_seconds": settings.alert_batch_seconds,
+                "max_photos": settings.alert_batch_max_photos,
+            }
+        },
         "system": {
             "hostname": socket.gethostname(),
             "uptime_seconds": read_system_uptime(),

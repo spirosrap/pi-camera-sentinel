@@ -1,6 +1,9 @@
 "use strict";
 
 const elements = {
+  alertBatchDetail: document.querySelector("#alert-batch-detail"),
+  alertBatchRow: document.querySelector("#alert-batch-row"),
+  alertBatchState: document.querySelector("#alert-batch-state"),
   appTitle: document.querySelector("#app-title"),
   appVersion: document.querySelector("#app-version"),
   autoExposureToggle: document.querySelector("#auto-exposure-toggle"),
@@ -229,7 +232,7 @@ async function toggleFullscreen() {
 }
 
 function renderStatus(status) {
-  const { camera, feed, integrations, system, warnings } = status;
+  const { automation, camera, feed, integrations, system, warnings } = status;
   document.title = status.title;
   elements.appTitle.textContent = status.title;
   elements.appVersion.textContent = `v${status.version}`;
@@ -271,6 +274,8 @@ function renderStatus(status) {
   elements.systemValue.textContent = system.temperature_c == null ? system.hostname : `${system.temperature_c} C`;
   elements.systemDetail.textContent = formatDuration(system.uptime_seconds);
 
+  renderAlertBatching(automation?.alert_batching || { enabled: false });
+
   if (!viewState.webhookBusy) {
     renderWebhookIntegration(integrations?.home_assistant || { configured: false });
   }
@@ -294,6 +299,19 @@ function renderStatus(status) {
     showStreamNotice("Camera feed unavailable");
   } else if (viewState.streamLoaded && !viewState.paused) {
     hideStreamNotice();
+  }
+}
+
+function renderAlertBatching(batching) {
+  const enabled = Boolean(batching.enabled);
+  elements.alertBatchRow.dataset.state = enabled ? "active" : "inactive";
+  elements.alertBatchState.textContent = enabled ? "On" : "Off";
+  if (enabled) {
+    const windowSeconds = Number(batching.window_seconds);
+    const windowLabel = Number.isInteger(windowSeconds) ? windowSeconds : windowSeconds.toFixed(1);
+    elements.alertBatchDetail.textContent = `${windowLabel}s window / up to ${batching.max_photos} photos`;
+  } else {
+    elements.alertBatchDetail.textContent = "Immediate single alerts";
   }
 }
 

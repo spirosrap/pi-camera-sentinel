@@ -12,6 +12,7 @@ This project is intentionally small: no cloud camera account, no public port for
 - Watches snapshots for motion using frame differencing.
 - Supports dashboard-drawn ignored areas for excluding noisy motion zones.
 - Sends Telegram photo alerts on motion.
+- Groups nearby detections into one Telegram album instead of separate alerts.
 - Can emit Home Assistant-compatible JSON webhooks for motion automations.
 - Supports timezone-aware Telegram quiet hours while continuing to archive motion.
 - Can attach short video clips if enabled.
@@ -117,6 +118,7 @@ The `pi-camera-sentinel serve` command provides a small same-origin web app on p
 - current frame age, resolution, dropped-frame count, and exposure level
 - camera, power, temperature, uptime, and storage status
 - motion-alert and exposure-recovery state with pause and resume toggles
+- active Telegram alert-batching window and photo limit
 - secret-safe Home Assistant webhook state and test delivery
 - quiet-hours schedule controls for Telegram notifications
 - a pointer- and touch-friendly editor for ignored motion areas
@@ -190,6 +192,8 @@ The default motion settings are deliberately conservative:
 SENTINEL_CHANGED_RATIO=0.035
 SENTINEL_MIN_FRAMES=2
 SENTINEL_COOLDOWN_SECONDS=60
+SENTINEL_ALERT_BATCH_SECONDS=8
+SENTINEL_ALERT_BATCH_MAX_PHOTOS=4
 ```
 
 Sample the current scene:
@@ -199,6 +203,8 @@ pi-camera-sentinel sample 10
 ```
 
 If the scene is noisy, increase `SENTINEL_CHANGED_RATIO`. If small motion is missed, lower it.
+
+Nearby detections are collected for eight seconds and delivered as one Telegram album containing up to four representative frames. The first frame is retained and the newest frame continually replaces the final slot after the limit is reached. Set `SENTINEL_ALERT_BATCH_SECONDS=0` for immediate single-photo alerts. The normal cooldown starts when a batch is delivered.
 
 Use **Motion zones** in the dashboard to exclude areas such as moving plants, reflections, clocks, or status lights. Add and apply rectangles over a current snapshot; no service restart is required.
 

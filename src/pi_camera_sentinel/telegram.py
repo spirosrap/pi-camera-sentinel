@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
+from contextlib import ExitStack
 from pathlib import Path
+from typing import Sequence
 
 import requests
 
@@ -48,6 +51,33 @@ def send_photo(settings: Settings, path: Path, caption: str) -> None:
                 "caption": caption,
             },
             files={"photo": handle},
+        )
+
+
+def send_media_group(settings: Settings, paths: Sequence[Path], caption: str) -> None:
+    if len(paths) < 2 or len(paths) > 10:
+        raise ValueError("Telegram media groups require between 2 and 10 photos")
+
+    media: list[dict[str, str]] = []
+    with ExitStack() as stack:
+        files = {}
+        for index, path in enumerate(paths):
+            attachment = f"photo{index}"
+            handle = stack.enter_context(path.open("rb"))
+            files[attachment] = (path.name, handle, "image/jpeg")
+            item = {"type": "photo", "media": f"attach://{attachment}"}
+            if index == 0:
+                item["caption"] = caption
+            media.append(item)
+
+        telegram_request(
+            settings,
+            "sendMediaGroup",
+            data={
+                "chat_id": settings.telegram_chat_id,
+                "media": json.dumps(media, separators=(",", ":")),
+            },
+            files=files,
         )
 
 

@@ -6,8 +6,8 @@
     <meta name="theme-color" content="#171a18">
     <meta name="color-scheme" content="light">
     <title>Pi Camera Sentinel</title>
-    <link rel="stylesheet" href="/assets/styles.css?v=0.8.0">
-    <script src="/assets/app.js?v=0.8.0" defer></script>
+    <link rel="stylesheet" href="/assets/styles.css?v=0.9.0">
+    <script src="/assets/app.js?v=0.9.0" defer></script>
   </head>
   <body>
     <header class="topbar">
@@ -17,7 +17,7 @@
           <span class="brand-kicker">Private camera</span>
           <span class="brand-name-row">
             <strong id="app-title">Pi Camera Sentinel</strong>
-            <span class="app-version" id="app-version">v0.8.0</span>
+            <span class="app-version" id="app-version">v0.9.0</span>
           </span>
         </span>
       </a>
@@ -117,6 +117,19 @@
                 <span class="toggle-track" aria-hidden="true"></span>
                 <span class="visually-hidden">Motion alerts enabled</span>
               </label>
+            </div>
+          </article>
+
+          <article class="service-row" id="alert-batch-row" data-state="loading">
+            <div class="service-copy">
+              <span class="service-signal" aria-hidden="true"></span>
+              <div>
+                <h3>Alert batching</h3>
+                <p id="alert-batch-detail">Reading delivery mode</p>
+              </div>
+            </div>
+            <div class="service-action">
+              <strong id="alert-batch-state">Checking</strong>
             </div>
           </article>
 

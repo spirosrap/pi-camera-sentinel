@@ -93,3 +93,27 @@ def test_deliver_webhook_posts_json_with_timeout():
             },
         )
     ]
+
+
+def test_webhook_payload_includes_batch_capture_links():
+    payload = webhook_payload(
+        webhook_settings(),
+        event="motion",
+        captured_at=dt.datetime(2026, 7, 14, 20, 0, tzinfo=dt.timezone.utc),
+        ratio=0.25,
+        capture_path=Path("motion-first.jpg"),
+        batch_count=5,
+        batch_duration_seconds=7.1239,
+        batch_capture_paths=[Path("motion-first.jpg"), Path("motion-last.jpg")],
+    )
+
+    assert payload["batch"] == {
+        "detection_count": 5,
+        "duration_seconds": 7.124,
+        "photo_count": 2,
+        "captures": ["motion-first.jpg", "motion-last.jpg"],
+        "event_urls": [
+            "https://camera.example/events/motion-first.jpg",
+            "https://camera.example/events/motion-last.jpg",
+        ],
+    }

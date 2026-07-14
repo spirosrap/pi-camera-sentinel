@@ -1,9 +1,11 @@
+import datetime as dt
 from dataclasses import replace
 
 import pytest
 import requests
 
 from pi_camera_sentinel import cli
+from pi_camera_sentinel.batching import MotionBatch, MotionSample
 from pi_camera_sentinel.config import Settings
 from pi_camera_sentinel.policy import AlertPolicy, save_alert_policy
 
@@ -75,6 +77,45 @@ def test_webhook_failure_does_not_block_telegram(monkeypatch, tmp_path):
 
     assert sent == [True]
     assert len(list(settings.output_dir.glob("motion-*.jpg"))) == 1
+
+
+def test_motion_batch_sends_album_and_webhook_summary(monkeypatch, tmp_path):
+    settings = replace(
+        motion_settings(tmp_path),
+        webhook_url="http://homeassistant.local/api/webhook/secret",
+    )
+    captured_at = dt.datetime(2026, 7, 14, 20, 0, tzinfo=dt.timezone.utc)
+    batch = MotionBatch.start(
+        MotionSample(b"first", 0.1, captured_at),
+        now=100,
+        window_seconds=8,
+        max_photos=4,
+    )
+    batch.add(MotionSample(b"second", 0.4, captured_at + dt.timedelta(seconds=2)))
+    batch.add(MotionSample(b"third", 0.2, captured_at + dt.timedelta(seconds=5)))
+    albums = []
+    webhooks = []
+    monkeypatch.setattr(cli, "send_photo", lambda *_args: pytest.fail("album expected"))
+    monkeypatch.setattr(
+        cli,
+        "send_media_group",
+        lambda _settings, paths, text: albums.append((paths, text)),
+    )
+    monkeypatch.setattr(
+        cli,
+        "deliver_webhook",
+        lambda _settings, payload: webhooks.append(payload) or 202,
+    )
+
+    cli.handle_motion_batch(settings, batch)
+
+    paths, text = albums[0]
+    assert [path.read_bytes() for path in paths] == [b"first", b"second", b"third"]
+    assert "Motion burst: 3 detections over 5s" in text
+    assert webhooks[0]["changed_ratio"] == 0.4
+    assert webhooks[0]["batch"]["detection_count"] == 3
+    assert webhooks[0]["batch"]["photo_count"] == 3
+    assert len(webhooks[0]["batch"]["event_urls"]) == 3
 
 
 def test_send_webhook_test_reports_status_without_url(monkeypatch, capsys):

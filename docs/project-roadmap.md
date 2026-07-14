@@ -14,13 +14,10 @@
 - timezone-aware Telegram quiet hours with dashboard controls
 - masked zones for motion detection with dashboard editor
 - optional Home Assistant webhook output
+- batched Telegram albums for nearby motion detections
 - camera tuning profiles
 - exposure watchdog for black/washed-out frames
 - systemd installer
-
-## Good Next Features
-
-- alert batching
 
 ## Non-Goals For Now
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import socket
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Sequence
 from urllib.parse import quote, urlsplit, urlunsplit
 
 import requests
@@ -49,11 +49,14 @@ def webhook_payload(
     captured_at: dt.datetime,
     ratio: float | None = None,
     capture_path: Path | None = None,
+    batch_count: int | None = None,
+    batch_duration_seconds: float | None = None,
+    batch_capture_paths: Sequence[Path] | None = None,
 ) -> dict[str, object]:
     if captured_at.tzinfo is None:
         captured_at = captured_at.astimezone()
     capture_name = capture_path.name if capture_path is not None else None
-    return {
+    payload: dict[str, object] = {
         "event": event,
         "source": "pi-camera-sentinel",
         "camera": settings.dashboard_title,
@@ -64,6 +67,16 @@ def webhook_payload(
         "event_url": event_capture_url(settings.feed_url, capture_name),
         "feed_url": settings.feed_url or None,
     }
+    if batch_count is not None:
+        capture_names = [path.name for path in batch_capture_paths or ()]
+        payload["batch"] = {
+            "detection_count": batch_count,
+            "duration_seconds": round(batch_duration_seconds or 0.0, 3),
+            "photo_count": len(capture_names),
+            "captures": capture_names,
+            "event_urls": [event_capture_url(settings.feed_url, name) for name in capture_names],
+        }
+    return payload
 
 
 def deliver_webhook(
