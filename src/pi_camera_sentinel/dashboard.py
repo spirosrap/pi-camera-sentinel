@@ -23,7 +23,7 @@ from PIL import Image, ImageStat
 from . import __version__
 from .camera import apply_profile, camera_state, set_controls
 from .config import Settings
-from .health import disk_status, recent_undervoltage_seen
+from .health import PowerStatus, disk_status, read_power_status
 from .masks import MAX_MOTION_MASKS, load_motion_masks, save_motion_masks, validate_motion_masks
 from .policy import AlertPolicy, load_alert_policy, save_alert_policy
 from .recovery import RecoveryState, load_recovery_state, manual_restart_feed
@@ -73,7 +73,7 @@ def frame_luma(image: Image.Image) -> float:
 def collect_dashboard_status(
     settings: Settings,
     *,
-    undervoltage_seen: bool | None,
+    power_status: PowerStatus,
     snapshot_get: Callable[..., requests.Response] = requests.get,
 ) -> dict:
     started = time.monotonic()
@@ -136,8 +136,12 @@ def collect_dashboard_status(
     )
     if disk_low:
         warnings.append(f"less than {settings.disk_min_free_mb} MB of storage remains")
-    if undervoltage_seen:
-        warnings.append("recent Pi kernel logs report undervoltage")
+    if power_status.state == "active":
+        warnings.append(f"active Pi power limit: {', '.join(power_status.current_issues)}")
+    elif power_status.state == "recovered":
+        warnings.append("recent Pi undervoltage recovered; monitor the power supply")
+    elif power_status.state == "recent":
+        warnings.append("recent Pi kernel logs report undervoltage; current hardware state is unavailable")
 
     try:
         recovery_state = load_recovery_state(
@@ -155,7 +159,7 @@ def collect_dashboard_status(
     feed_ok = bool(feed["ok"] and feed["online"])
     if not feed_ok or not camera_exists:
         state = "offline"
-    elif disk_low or undervoltage_seen:
+    elif disk_low or power_status.state in {"active", "recovered", "recent"}:
         state = "degraded"
     else:
         state = "online"
@@ -189,7 +193,8 @@ def collect_dashboard_status(
             "hostname": socket.gethostname(),
             "uptime_seconds": read_system_uptime(),
             "temperature_c": read_cpu_temperature(),
-            "undervoltage_seen": undervoltage_seen,
+            "undervoltage_seen": power_status.undervoltage_seen,
+            "power": power_status.to_dict(),
             "disk_path": str(disk_path),
             "disk_free_bytes": disk_free_bytes,
             "disk_total_bytes": disk_total_bytes,
@@ -322,8 +327,8 @@ class DashboardApplication:
         self.settings = settings
         self._status: dict | None = None
         self._status_at = 0.0
-        self._undervoltage: bool | None = None
-        self._undervoltage_at = 0.0
+        self._power: PowerStatus | None = None
+        self._power_at = 0.0
         self._camera_lock = threading.RLock()
         self._mask_lock = threading.RLock()
         self._policy_lock = threading.RLock()
@@ -334,12 +339,12 @@ class DashboardApplication:
         now = time.monotonic()
         if self._status is not None and now - self._status_at < self.settings.dashboard_status_cache_seconds:
             return self._status
-        if now - self._undervoltage_at >= 60:
-            self._undervoltage = recent_undervoltage_seen()
-            self._undervoltage_at = now
+        if self._power is None or now - self._power_at >= 60:
+            self._power = read_power_status()
+            self._power_at = now
         self._status = collect_dashboard_status(
             self.settings,
-            undervoltage_seen=self._undervoltage,
+            power_status=self._power,
         )
         self._status_at = now
         return self._status

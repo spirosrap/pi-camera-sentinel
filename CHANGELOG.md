@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.2.0 - 2026-07-15
+
+- Read Raspberry Pi `vcgencmd get_throttled` hardware flags in addition to kernel logs.
+- Distinguish active throttling, recently recovered undervoltage, and historical since-boot events.
+- Expose current and historical power flags through the healthcheck and dashboard status API.
+- Degrade dashboard health only for active or recent power problems, not sticky historical flags.
+- Highlight the Power metric with a concise explanation of the current hardware state.
+- Keep the legacy `undervoltage_seen` field for existing integrations.
+
 ## 1.1.0 - 2026-07-15
 
 - Add a dashboard action for immediately restarting the configured camera feed service.

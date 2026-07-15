@@ -363,6 +363,36 @@ main {
   white-space: nowrap;
 }
 
+.metric[data-state="active"] {
+  background: var(--red-soft);
+}
+
+.metric[data-state="active"] strong {
+  color: var(--red);
+}
+
+.metric[data-state="recovered"],
+.metric[data-state="recent"] {
+  background: var(--amber-soft);
+}
+
+.metric[data-state="recovered"] strong,
+.metric[data-state="recent"] strong,
+.metric[data-state="historical"] strong {
+  color: var(--amber);
+}
+
+.metric[data-state="stable"] strong {
+  color: var(--green);
+}
+
+#power-metric strong,
+#power-metric .metric-detail {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+}
+
 .metric strong {
   margin-top: 11px;
   font-size: 17px;

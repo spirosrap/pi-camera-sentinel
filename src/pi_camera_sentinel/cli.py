@@ -514,7 +514,7 @@ def build_parser() -> argparse.ArgumentParser:
         func=cmd_send_webhook_test
     )
     subparsers.add_parser("show-chat-ids", help="print chat IDs from recent bot updates").set_defaults(func=cmd_show_chat_ids)
-    subparsers.add_parser("healthcheck", help="check snapshot, camera, and undervoltage status").set_defaults(func=cmd_health)
+    subparsers.add_parser("healthcheck", help="check snapshot, camera, power, and storage status").set_defaults(func=cmd_health)
     subparsers.add_parser("serve", help="serve the web dashboard and camera proxy").set_defaults(func=cmd_serve)
     subparsers.add_parser("camera-controls", help="list v4l2 camera controls").set_defaults(func=cmd_camera_controls)
     subparsers.add_parser("camera-get", help="print common camera controls as JSON").set_defaults(func=cmd_camera_get)

@@ -20,7 +20,7 @@ This project is intentionally small: no cloud camera account, no public port for
 - Can automatically switch between day and low-light exposure profiles.
 - Automatically restarts an unavailable or stale feed after repeated failed checks.
 - Records recent feed outages, restart attempts, and successful recoveries.
-- Includes health checks for feed availability and Pi undervoltage warnings.
+- Includes health checks for feed availability, live Pi power throttling, and storage.
 - Reports low storage, CPU temperature, frame freshness, and camera availability.
 - Shows live motion-alert and exposure-watchdog service state with pause and resume controls.
 
@@ -124,7 +124,7 @@ The `pi-camera-sentinel serve` command provides a small same-origin web app on p
 
 - live, pause, reconnect, snapshot, and fullscreen controls
 - current frame age, resolution, dropped-frame count, and exposure level
-- camera, power, temperature, uptime, and storage status
+- camera, live Raspberry Pi power flags, temperature, uptime, and storage status
 - motion-alert and exposure-recovery state with pause and resume toggles
 - feed-recovery state, incident history, manual restart action, and pause control
 - active Telegram alert-batching window and photo limit
@@ -139,6 +139,12 @@ The `pi-camera-sentinel serve` command provides a small same-origin web app on p
 The event API at `/api/events` accepts a validated `window` (`24h`, `7d`, or `all`), a page `limit`, and an optional `before` cursor. Responses include retained-file counts and storage totals as well as the current page.
 
 The server proxies `/stream` and `/snapshot` to `ustreamer`, which keeps the raw camera port private when Tailscale Serve points at the dashboard.
+
+## Power Diagnostics
+
+On Raspberry Pi hardware, the dashboard and `healthcheck` command read `vcgencmd get_throttled`. They distinguish a power limit that is active now from a recently recovered undervoltage warning and a sticky event that only records something happened since the last boot. Historical flags remain visible without keeping the whole dashboard in a degraded state.
+
+The status API preserves `system.undervoltage_seen` for compatibility and adds structured details under `system.power`, including the raw flag value and individual current and occurred flags. See [docs/power-diagnostics.md](docs/power-diagnostics.md).
 
 Camera writes accept only known V4L2 controls and integer values inside the device-reported range. Browser writes also require a same-origin JSON request. The dashboard deliberately caps manual gain at `128` and exposure at `250` to avoid the extreme settings that can wash a C920 frame completely white.
 

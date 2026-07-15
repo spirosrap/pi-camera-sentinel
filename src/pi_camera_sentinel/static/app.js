@@ -49,6 +49,7 @@ const elements = {
   maskResetButton: document.querySelector("#motion-mask-reset"),
   pauseButton: document.querySelector("#pause-button"),
   powerDetail: document.querySelector("#power-detail"),
+  powerMetric: document.querySelector("#power-metric"),
   powerValue: document.querySelector("#power-value"),
   profileControls: document.querySelector("#profile-controls"),
   quietHoursApply: document.querySelector("#quiet-hours-apply"),
@@ -268,16 +269,7 @@ function renderStatus(status) {
   elements.exposureValue.textContent = exposure[0];
   elements.exposureDetail.textContent = exposure[1];
 
-  if (system.undervoltage_seen === true) {
-    elements.powerValue.textContent = "Undervoltage";
-    elements.powerDetail.textContent = "Check supply and USB load";
-  } else if (system.undervoltage_seen === false) {
-    elements.powerValue.textContent = "Stable";
-    elements.powerDetail.textContent = "No recent warning";
-  } else {
-    elements.powerValue.textContent = "Unknown";
-    elements.powerDetail.textContent = "Kernel status unavailable";
-  }
+  renderPowerStatus(system.power, system.undervoltage_seen);
 
   elements.storageValue.textContent = `${formatBytes(system.disk_free_bytes)} free`;
   elements.storageDetail.textContent = `${system.disk_free_percent}% available`;
@@ -311,6 +303,36 @@ function renderStatus(status) {
     showStreamNotice("Camera feed unavailable");
   } else if (viewState.streamLoaded && !viewState.paused) {
     hideStreamNotice();
+  }
+}
+
+function renderPowerStatus(power, legacyUndervoltage) {
+  const state = power?.state || "unknown";
+  const currentIssues = Array.isArray(power?.current_issues) ? power.current_issues : [];
+  const occurredIssues = Array.isArray(power?.occurred_issues) ? power.occurred_issues : [];
+  elements.powerMetric.dataset.state = state;
+
+  if (state === "active") {
+    elements.powerValue.textContent = power.under_voltage_now ? "Undervoltage now" : "Throttling now";
+    elements.powerDetail.textContent = currentIssues.join(" / ") || "Pi hardware limit active";
+  } else if (state === "recovered") {
+    elements.powerValue.textContent = "Recovered";
+    elements.powerDetail.textContent = "Recent undervoltage / stable now";
+  } else if (state === "recent") {
+    elements.powerValue.textContent = "Recent warning";
+    elements.powerDetail.textContent = "Current hardware flags unavailable";
+  } else if (state === "historical") {
+    elements.powerValue.textContent = "Past issue";
+    elements.powerDetail.textContent = `${occurredIssues.join(" / ")} since boot`;
+  } else if (state === "stable") {
+    elements.powerValue.textContent = "Stable";
+    elements.powerDetail.textContent = "No active throttling flags";
+  } else if (legacyUndervoltage === true) {
+    elements.powerValue.textContent = "Recent warning";
+    elements.powerDetail.textContent = "Check supply and USB load";
+  } else {
+    elements.powerValue.textContent = "Unknown";
+    elements.powerDetail.textContent = "Power telemetry unavailable";
   }
 }
 

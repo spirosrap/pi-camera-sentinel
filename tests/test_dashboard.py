@@ -17,6 +17,7 @@ from pi_camera_sentinel.dashboard import (
     with_query,
 )
 from pi_camera_sentinel.recovery import RecoveryEvent, RecoveryState
+from pi_camera_sentinel.health import power_status_from_flags
 
 
 class FakeResponse:
@@ -47,6 +48,10 @@ def dashboard_settings(tmp_path) -> Settings:
     )
 
 
+def power_status(flags: int = 0, recent: bool = False):
+    return power_status_from_flags((flags, hex(flags)), recent)
+
+
 def test_collect_dashboard_status_for_online_feed(tmp_path):
     response = FakeResponse(
         jpeg_bytes(),
@@ -60,7 +65,7 @@ def test_collect_dashboard_status_for_online_feed(tmp_path):
 
     result = collect_dashboard_status(
         dashboard_settings(tmp_path),
-        undervoltage_seen=False,
+        power_status=power_status(),
         snapshot_get=lambda *_args, **_kwargs: response,
     )
 
@@ -81,18 +86,35 @@ def test_collect_dashboard_status_for_online_feed(tmp_path):
     assert result["integrations"]["home_assistant"]["configured"] is False
 
 
-def test_collect_dashboard_status_marks_undervoltage_as_degraded(tmp_path):
+def test_collect_dashboard_status_marks_active_power_limit_as_degraded(tmp_path):
     response = FakeResponse(jpeg_bytes(), {"content-type": "image/jpeg"})
 
     result = collect_dashboard_status(
         dashboard_settings(tmp_path),
-        undervoltage_seen=True,
+        power_status=power_status(0x50005),
         snapshot_get=lambda *_args, **_kwargs: response,
     )
 
     assert result["state"] == "degraded"
     assert result["system"]["undervoltage_seen"] is True
-    assert any("undervoltage" in warning for warning in result["warnings"])
+    assert result["system"]["power"]["state"] == "active"
+    assert result["system"]["power"]["current_issues"] == ("Undervoltage", "CPU throttled")
+    assert any("active Pi power limit" in warning for warning in result["warnings"])
+
+
+def test_collect_dashboard_status_does_not_degrade_for_historical_power_flag(tmp_path):
+    response = FakeResponse(jpeg_bytes(), {"content-type": "image/jpeg"})
+
+    result = collect_dashboard_status(
+        dashboard_settings(tmp_path),
+        power_status=power_status(0x50000),
+        snapshot_get=lambda *_args, **_kwargs: response,
+    )
+
+    assert result["state"] == "online"
+    assert result["system"]["undervoltage_seen"] is False
+    assert result["system"]["power"]["state"] == "historical"
+    assert result["warnings"] == []
 
 
 def test_collect_dashboard_status_marks_failed_snapshot_offline(tmp_path):
@@ -101,7 +123,7 @@ def test_collect_dashboard_status_marks_failed_snapshot_offline(tmp_path):
 
     result = collect_dashboard_status(
         dashboard_settings(tmp_path),
-        undervoltage_seen=False,
+        power_status=power_status(),
         snapshot_get=failed_snapshot,
     )
 
