@@ -27,6 +27,7 @@ from .health import PowerStatus, disk_status, read_power_status
 from .masks import MAX_MOTION_MASKS, load_motion_masks, save_motion_masks, validate_motion_masks
 from .policy import AlertPolicy, load_alert_policy, save_alert_policy
 from .recovery import RecoveryState, load_recovery_state, manual_restart_feed
+from .retention import RetentionPolicy, plan_retention, policy_from_settings
 from .services import service_state, set_service_active
 from .webhook import deliver_webhook, webhook_payload
 
@@ -232,6 +233,7 @@ def event_history(
     limit: int = 12,
     before: float | None = None,
     now: float | None = None,
+    retention_policy: RetentionPolicy | None = None,
 ) -> dict[str, object]:
     if window not in EVENT_WINDOWS:
         raise ValueError("window must be one of: 24h, 7d, all")
@@ -258,20 +260,28 @@ def event_history(
         for path, timestamp, size in page
     ]
 
+    summary: dict[str, object] = {
+        "window_count": len(window_records),
+        "window_size_bytes": sum(record[2] for record in window_records),
+        "retained_count": len(records),
+        "retained_size_bytes": sum(record[2] for record in records),
+        "last_captured_at": (
+            dt.datetime.fromtimestamp(records[0][1], dt.timezone.utc).isoformat()
+            if records
+            else None
+        ),
+    }
+    if retention_policy is not None:
+        summary["retention"] = plan_retention(
+            directory,
+            retention_policy,
+            now=current_time,
+        ).to_dict()
+
     return {
         "events": events,
         "window": window,
-        "summary": {
-            "window_count": len(window_records),
-            "window_size_bytes": sum(record[2] for record in window_records),
-            "retained_count": len(records),
-            "retained_size_bytes": sum(record[2] for record in records),
-            "last_captured_at": (
-                dt.datetime.fromtimestamp(records[0][1], dt.timezone.utc).isoformat()
-                if records
-                else None
-            ),
-        },
+        "summary": summary,
         "next_before": page[-1][1] if has_more and page else None,
     }
 
@@ -361,6 +371,7 @@ class DashboardApplication:
             window=window,
             limit=limit,
             before=before,
+            retention_policy=policy_from_settings(self.settings),
         )
 
     def camera(self) -> dict[str, object]:

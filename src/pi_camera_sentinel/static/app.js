@@ -22,6 +22,7 @@ const elements = {
   eventsEmpty: document.querySelector("#events-empty"),
   eventsLoadMore: document.querySelector("#events-load-more"),
   eventsMeta: document.querySelector("#events-meta"),
+  retentionMeta: document.querySelector("#retention-meta"),
   exposureDetail: document.querySelector("#exposure-detail"),
   exposureValue: document.querySelector("#exposure-value"),
   feedDetail: document.querySelector("#feed-detail"),
@@ -1143,6 +1144,22 @@ function renderEventSummary() {
     const label = viewState.eventWindow === "24h" ? "24 hours" : "7 days";
     elements.eventsMeta.textContent = `${shown} shown / ${summary.window_count} in ${label} / ${summary.retained_count} retained / ${storage}`;
   }
+
+  const retention = summary.retention;
+  if (!retention) {
+    elements.retentionMeta.textContent = "Archive policy unavailable";
+    return;
+  }
+  const limits = [];
+  if (retention.policy.max_files > 0) limits.push(`${retention.policy.max_files} files`);
+  if (retention.policy.max_age_days > 0) limits.push(`${retention.policy.max_age_days} days`);
+  if (retention.policy.max_bytes > 0) limits.push(formatBytes(retention.policy.max_bytes));
+  const policy = limits.length > 0 ? limits.join(" / ") : "no automatic cleanup";
+  const current = `${retention.archive.file_count} files / ${formatBytes(retention.archive.size_bytes)}`;
+  const pending = retention.cleanup.pending
+    ? ` / ${retention.cleanup.file_count} pending cleanup`
+    : " / within limits";
+  elements.retentionMeta.textContent = `Archive: ${current} / policy ${policy}${pending}`;
 }
 
 function renderEvents() {
@@ -1175,6 +1192,7 @@ async function refreshEvents({ append = false } = {}) {
     }
     elements.eventPagination.hidden = append ? viewState.eventCursor == null : true;
     elements.eventsMeta.textContent = "Archive unavailable";
+    elements.retentionMeta.textContent = "Archive policy unavailable";
   } finally {
     setEventsBusy(false);
   }

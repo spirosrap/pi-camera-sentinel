@@ -48,6 +48,18 @@ def test_alert_batch_configuration(monkeypatch):
     assert settings.alert_batch_max_photos == 6
 
 
+def test_archive_retention_configuration(monkeypatch):
+    monkeypatch.setenv("SENTINEL_RETENTION_FILES", "300")
+    monkeypatch.setenv("SENTINEL_RETENTION_DAYS", "14.5")
+    monkeypatch.setenv("SENTINEL_RETENTION_MB", "2048")
+
+    settings = Settings.from_env()
+
+    assert settings.retention_files == 300
+    assert settings.retention_days == 14.5
+    assert settings.retention_mb == 2048
+
+
 def test_feed_recovery_configuration(monkeypatch, tmp_path):
     monkeypatch.setenv("SENTINEL_STREAM_SERVICE", "custom-stream.service")
     monkeypatch.setenv("SENTINEL_RECOVERY_SERVICE", "custom-recovery.service")

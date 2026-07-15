@@ -990,6 +990,14 @@ main {
   text-align: right;
 }
 
+.retention-meta {
+  margin: -2px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+  text-align: right;
+}
+
 .event-range-control {
   grid-template-columns: repeat(3, minmax(82px, 1fr));
 }
@@ -1279,6 +1287,10 @@ dialog time {
   }
 
   .events-toolbar .section-meta {
+    text-align: left;
+  }
+
+  .retention-meta {
     text-align: left;
   }
 

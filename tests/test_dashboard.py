@@ -17,6 +17,7 @@ from pi_camera_sentinel.dashboard import (
     with_query,
 )
 from pi_camera_sentinel.recovery import RecoveryEvent, RecoveryState
+from pi_camera_sentinel.retention import RetentionPolicy
 from pi_camera_sentinel.health import power_status_from_flags
 
 
@@ -179,6 +180,31 @@ def test_event_history_filters_summarizes_and_paginates(tmp_path):
     assert second_page["next_before"] is None
     assert event_history(tmp_path, window="7d", now=now)["summary"]["window_count"] == 3
     assert event_history(tmp_path, window="all", now=now)["summary"]["window_count"] == 4
+
+
+def test_event_history_reports_archive_retention_state(tmp_path):
+    now = 2_000_000.0
+    for index in range(3):
+        path = tmp_path / f"motion-{index}.jpg"
+        path.write_bytes(b"x" * (index + 1))
+        os.utime(path, (now - index, now - index))
+
+    result = event_history(
+        tmp_path,
+        window="all",
+        now=now,
+        retention_policy=RetentionPolicy(max_files=2),
+    )
+
+    retention = result["summary"]["retention"]
+    assert retention["policy"]["max_files"] == 2
+    assert retention["archive"] == {
+        "file_count": 3,
+        "size_bytes": 6,
+        "oldest_at": "1970-01-24T03:33:18+00:00",
+    }
+    assert retention["cleanup"]["file_count"] == 1
+    assert retention["projected_archive"]["file_count"] == 2
 
 
 def test_parse_event_query_validates_range_limit_and_cursor():

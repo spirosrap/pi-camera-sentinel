@@ -15,6 +15,7 @@ This project is intentionally small: no cloud camera account, no public port for
 - Groups nearby detections into one Telegram album instead of separate alerts.
 - Can emit Home Assistant-compatible JSON webhooks for motion automations.
 - Supports timezone-aware Telegram quiet hours while continuing to archive motion.
+- Bounds the local photo and video archive by count, age, and total size.
 - Can attach short video clips if enabled.
 - Provides camera profiles for common USB webcam exposure issues.
 - Can automatically switch between day and low-light exposure profiles.
@@ -134,9 +135,10 @@ The `pi-camera-sentinel serve` command provides a small same-origin web app on p
 - camera profiles plus safe manual exposure, color, gain, sharpness, and white-balance controls
 - retained motion snapshots with 24-hour, 7-day, and all-time filters
 - archive totals and paginated access to older captures
+- active archive limits and pending cleanup status
 - `/healthz`, `/api/status`, `/api/camera`, `/api/policy`, `/api/masks`, `/api/recovery/restart`, and `/api/webhook/test` endpoints for monitoring and control
 
-The event API at `/api/events` accepts a validated `window` (`24h`, `7d`, or `all`), a page `limit`, and an optional `before` cursor. Responses include retained-file counts and storage totals as well as the current page.
+The event API at `/api/events` accepts a validated `window` (`24h`, `7d`, or `all`), a page `limit`, and an optional `before` cursor. Responses include retained-file counts, storage totals, and archive-retention state as well as the current page.
 
 The server proxies `/stream` and `/snapshot` to `ustreamer`, which keeps the raw camera port private when Tailscale Serve points at the dashboard.
 
@@ -165,6 +167,24 @@ SENTINEL_RECOVERY_COOLDOWN_SECONDS=120
 A failed HTTP request, non-image or empty response, explicit ustreamer offline signal, or frame timestamp older than the stale limit counts as a failure. Identical pixels do not count as stale, so a still scene cannot cause a restart loop. Recovery state, restart totals, and the 20 most recent incidents are stored atomically in `SENTINEL_RECOVERY_STATE_FILE` and displayed in the dashboard. The dashboard also provides a guarded **Restart feed** action for immediate intervention.
 
 Run one check manually with `pi-camera-sentinel recovery-step --json`. See [docs/recovery.md](docs/recovery.md).
+
+## Archive Retention
+
+The motion service applies archive limits after every delivered batch. The default preserves the existing behavior of keeping the newest 200 captures; optional age and total-size limits are disabled until configured:
+
+```text
+SENTINEL_RETENTION_FILES=200
+SENTINEL_RETENTION_DAYS=0
+SENTINEL_RETENTION_MB=0
+```
+
+Preview the exact candidates before applying a changed policy:
+
+```bash
+sudo sh -c 'set -a; . /etc/pi-camera-sentinel.env; set +a; pi-camera-sentinel retention-cleanup --dry-run'
+```
+
+Run the same command without `--dry-run` to apply it immediately. See [docs/archive-retention.md](docs/archive-retention.md) for ordering and JSON output details.
 
 Quiet hours are stored atomically in `SENTINEL_POLICY_FILE`. Set `SENTINEL_TIMEZONE` to an IANA timezone such as `Europe/Athens` when the schedule should not follow the Pi's system timezone. Motion captures remain in the archive during quiet hours; only Telegram delivery is suppressed.
 

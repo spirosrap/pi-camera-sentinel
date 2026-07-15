@@ -1,4 +1,7 @@
 import datetime as dt
+import json
+import os
+from argparse import Namespace
 from dataclasses import replace
 
 import pytest
@@ -129,3 +132,26 @@ def test_send_webhook_test_reports_status_without_url(monkeypatch, capsys):
     output = capsys.readouterr().out
     assert '"status_code": 204' in output
     assert "secret" not in output
+
+
+def test_retention_cleanup_dry_run_reports_candidates_without_deleting(tmp_path, capsys):
+    settings = replace(
+        motion_settings(tmp_path),
+        retention_files=1,
+        retention_days=0,
+        retention_mb=0,
+    )
+    settings.output_dir.mkdir(parents=True)
+    newest = settings.output_dir / "motion-new.jpg"
+    oldest = settings.output_dir / "motion-old.mp4"
+    newest.write_bytes(b"new")
+    oldest.write_bytes(b"old")
+    os.utime(newest, (200, 200))
+    os.utime(oldest, (100, 100))
+
+    assert cli.cmd_retention_cleanup(settings, Namespace(dry_run=True)) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["candidates"] == [{"name": oldest.name, "reason": "count"}]
+    assert payload["result"]["dry_run"] is True
+    assert newest.exists() and oldest.exists()

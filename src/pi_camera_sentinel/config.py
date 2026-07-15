@@ -62,6 +62,8 @@ class Settings:
     video_seconds: int
     video_fps: int
     retention_files: int
+    retention_days: float
+    retention_mb: int
     camera_device: str
     exposure_watchdog_interval: float
     exposure_settle_seconds: float
@@ -133,6 +135,8 @@ class Settings:
             video_seconds=env_int("SENTINEL_VIDEO_SECONDS", 5, "MOTION_VIDEO_SECONDS"),
             video_fps=env_int("SENTINEL_VIDEO_FPS", 10, "MOTION_VIDEO_FPS"),
             retention_files=env_int("SENTINEL_RETENTION_FILES", 200, "MOTION_RETENTION_FILES"),
+            retention_days=env_float("SENTINEL_RETENTION_DAYS", 0),
+            retention_mb=env_int("SENTINEL_RETENTION_MB", 0),
             camera_device=env_str("SENTINEL_CAMERA_DEVICE", "/dev/video0"),
             exposure_watchdog_interval=env_float("SENTINEL_EXPOSURE_WATCHDOG_INTERVAL", 60.0),
             exposure_settle_seconds=env_float("SENTINEL_EXPOSURE_SETTLE_SECONDS", 8.0),

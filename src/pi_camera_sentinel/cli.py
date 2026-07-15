@@ -26,6 +26,7 @@ from .recovery import (
     recovery_watchdog_step,
     validate_recovery_config,
 )
+from .retention import RetentionPolicy, enforce_retention, policy_from_settings
 from .telegram import get_chat_ids, send_media_group, send_message, send_photo, send_video
 from .webhook import deliver_webhook, webhook_payload
 
@@ -70,18 +71,19 @@ def batch_caption(settings: Settings, batch: MotionBatch) -> str:
 
 
 def cleanup_old_files(directory: Path, max_files: int) -> None:
-    if max_files <= 0:
-        return
-    files = sorted(
-        [path for path in directory.glob("motion-*") if path.is_file()],
-        key=lambda path: path.stat().st_mtime,
-        reverse=True,
-    )
-    for old in files[max_files:]:
-        try:
-            old.unlink()
-        except OSError as exc:
-            LOG.debug("could not remove old file %s: %s", old, exc)
+    enforce_retention(directory, RetentionPolicy(max_files=max_files))
+
+
+def cleanup_archive(settings: Settings) -> None:
+    result = enforce_retention(settings.output_dir, policy_from_settings(settings))
+    if result.removed:
+        LOG.info(
+            "archive retention removed files=%s bytes=%s",
+            len(result.removed),
+            sum(removal.file.size_bytes for removal in result.removed),
+        )
+    if result.errors:
+        LOG.warning("archive retention could not remove: %s", ", ".join(result.errors))
 
 
 def refresh_motion_masks(
@@ -202,7 +204,7 @@ def handle_motion_batch(settings: Settings, batch: MotionBatch) -> None:
                 LOG.info("Home Assistant webhook delivered status=%s", status_code)
             except Exception as exc:
                 LOG.warning("Home Assistant webhook delivery failed: %s", exc)
-        cleanup_old_files(settings.output_dir, settings.retention_files)
+        cleanup_archive(settings)
 
 
 def handle_motion_event(settings: Settings, snapshot: bytes, ratio: float) -> None:
@@ -223,8 +225,9 @@ def cmd_monitor(settings: Settings, _args: argparse.Namespace) -> int:
         return 2
     try:
         validate_batch_config(settings.alert_batch_seconds, settings.alert_batch_max_photos)
+        policy_from_settings(settings)
     except ValueError as exc:
-        LOG.error("invalid alert batching configuration: %s", exc)
+        LOG.error("invalid motion monitor configuration: %s", exc)
         return 2
 
     session = requests.Session()
@@ -386,6 +389,20 @@ def cmd_health(settings: Settings, _args: argparse.Namespace) -> int:
     return 0 if result.ok else 1
 
 
+def cmd_retention_cleanup(settings: Settings, args: argparse.Namespace) -> int:
+    try:
+        result = enforce_retention(
+            settings.output_dir,
+            policy_from_settings(settings),
+            dry_run=args.dry_run,
+        )
+    except ValueError as exc:
+        LOG.error("invalid archive retention configuration: %s", exc)
+        return 2
+    print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+    return 1 if result.errors else 0
+
+
 def cmd_camera_profile(settings: Settings, args: argparse.Namespace) -> int:
     controls = apply_profile(settings.camera_device, args.profile)
     print(json.dumps({"device": settings.camera_device, "profile": args.profile, "controls": controls}, sort_keys=True))
@@ -515,6 +532,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers.add_parser("show-chat-ids", help="print chat IDs from recent bot updates").set_defaults(func=cmd_show_chat_ids)
     subparsers.add_parser("healthcheck", help="check snapshot, camera, power, and storage status").set_defaults(func=cmd_health)
+    retention = subparsers.add_parser(
+        "retention-cleanup",
+        help="apply local motion archive retention limits",
+    )
+    retention.add_argument("--dry-run", action="store_true", help="report candidates without deleting files")
+    retention.set_defaults(func=cmd_retention_cleanup)
     subparsers.add_parser("serve", help="serve the web dashboard and camera proxy").set_defaults(func=cmd_serve)
     subparsers.add_parser("camera-controls", help="list v4l2 camera controls").set_defaults(func=cmd_camera_controls)
     subparsers.add_parser("camera-get", help="print common camera controls as JSON").set_defaults(func=cmd_camera_get)

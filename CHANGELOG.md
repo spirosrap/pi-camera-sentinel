@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.3.0 - 2026-07-15
+
+- Add deterministic archive retention limits by file count, age, and total size.
+- Apply the same policy to saved photos and optional motion video clips.
+- Preserve the newest contiguous set of captures when count or size limits are exceeded.
+- Add a JSON cleanup command with a non-destructive `--dry-run` mode.
+- Report current, pending, and projected archive usage through the event API.
+- Show the active archive policy and cleanup state in the dashboard.
+- Keep the existing 200-file limit while leaving new age and size limits disabled by default.
+
 ## 1.2.0 - 2026-07-15
 
 - Read Raspberry Pi `vcgencmd get_throttled` hardware flags in addition to kernel logs.
