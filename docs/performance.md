@@ -9,21 +9,26 @@ Pi Camera Sentinel keeps the live camera on the shortest path and moves secondar
 - Background polling stops while the page is hidden and refreshes initialized sections when the page returns.
 - API requests have a fixed timeout and periodic status requests cannot overlap themselves.
 - Event filters retain the current tiles while loading, and older pages append without rebuilding existing image elements.
+- The first visible gallery row receives eager browser priority; later rows remain lazy and low priority.
 - The selected full-resolution capture loads before adjacent viewer images are preloaded during browser idle time.
 
 ## Transfer And Cache Behavior
 
-The event API exposes a 480 x 270 thumbnail URL alongside every original capture URL. Thumbnails are generated on demand, held in a 256-entry process-memory cache, and never written to the archive or filesystem. The review viewer and download action continue to use the original retained file.
+The event API exposes a 320 x 180 thumbnail URL alongside every original capture URL. Thumbnails are generated on demand, held in a 256-entry process-memory cache, and never written to the archive or filesystem. A bounded three-worker queue prevents image decoding from overwhelming the Pi and coalesces simultaneous requests for the same frame. The review viewer and download action continue to use the original retained file.
 
-Versioned JavaScript and CSS, original event files, and thumbnail URLs use private or public immutable caching as appropriate. Index HTML revalidates with an ETag. Text, JavaScript, CSS, and JSON responses use gzip when the client advertises support. Dynamic API responses remain `no-store`.
+Versioned JavaScript and CSS, original event files, and thumbnail URLs use private or public immutable caching as appropriate. Index HTML revalidates with an ETag. Text, JavaScript, CSS, and JSON responses use gzip when the client advertises support. Static representations are read and compressed once, then retained in a bounded process cache. Dynamic API responses remain `no-store`.
 
 ## Pi Fast Path
 
 - One directory-generation cache supplies event pages, activity summaries, and retention planning without repeated file scans.
+- Unchanged event queries reuse a one-minute response cache that invalidates immediately when the archive directory changes.
 - One batched `systemctl show` process reads all monitored services; a short cache absorbs duplicate clients.
-- Status brightness sampling asks the JPEG decoder for a 320 x 180 grayscale draft, then reuses the metric for 30 seconds while reading fresh feed headers.
+- Expired service state is returned immediately while a generation-guarded background read refreshes it safely.
+- Status brightness sampling asks the JPEG decoder for a 320 x 180 grayscale draft, then refreshes it off the request thread while routine probes read only fresh feed headers.
 - Original event responses stream in 64 KB chunks rather than reading the entire file into each request thread.
+- Snapshot proxy responses also stream as they arrive instead of waiting for the entire upstream JPEG.
 - Status, archive, and service caches are guarded for concurrent dashboard clients.
+- Startup warming prepares static representations, live status, service state, event metadata, and the newest 12 thumbnails before interaction.
 
 Every response includes a same-origin `Server-Timing` measurement named `app`, making backend time visible in browser developer tools and automated performance checks.
 
@@ -42,3 +47,20 @@ Representative localhost measurements on the project Pi, comparing v1.9.0 with v
 | Dashboard HTML transfer | 20.9 KB | 3.7 KB |
 
 The thumbnail path reduces the initial gallery image transfer by 94.8%. Measurements vary with camera, storage, CPU, and network conditions; the important behavior is that routine polling avoids repeated device probes and archive scans.
+
+### v1.11 Fast Path
+
+Representative localhost comparisons on the same active Raspberry Pi 3B, from v1.10.0 to v1.11.0:
+
+| Path | v1.10.0 | v1.11.0 | Change |
+| --- | ---: | ---: | ---: |
+| Routine status response | 44.2 ms | 33.7 ms | 24% faster |
+| Status with expired brightness sample | 110.7 ms | 44.0 ms | 60% faster |
+| Expired service response | 233.4 ms | 38.2 ms | 84% faster |
+| Cached event response | 56.7 ms | 35.6 ms | 37% faster |
+| Cached JavaScript response | 85.4 ms | 36.2 ms | 58% faster |
+| Snapshot response headers | 67.4 ms | 46.9 ms | 30% faster |
+| First 12 gallery previews | 199 KB | 112 KB | 44% smaller |
+| Concurrent gallery load | 468 ms | 333 ms | 29% faster |
+
+The first five comparisons include localhost HTTP overhead. Their `Server-Timing` application work improved by approximately 36%, 66%, 95%, 73%, and 90%, respectively.

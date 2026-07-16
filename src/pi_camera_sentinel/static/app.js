@@ -1396,7 +1396,7 @@ function resetCaptureViewer() {
   elements.captureImageStatus.hidden = true;
 }
 
-function createEventItem(event) {
+function createEventItem(event, index = 0) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "event-item";
@@ -1406,10 +1406,11 @@ function createEventItem(event) {
   const image = document.createElement("img");
   image.src = event.thumbnail_url || event.url;
   image.alt = `Motion capture from ${dateTime.format(new Date(event.captured_at))}`;
-  image.loading = "lazy";
+  image.loading = index < 4 ? "eager" : "lazy";
   image.decoding = "async";
-  image.width = 480;
-  image.height = 270;
+  image.fetchPriority = index < 4 ? "high" : "low";
+  image.width = 320;
+  image.height = 180;
   image.addEventListener("load", () => {
     button.dataset.state = "ready";
   });
@@ -1614,7 +1615,10 @@ function renderEventActivity() {
 
 function renderEvents({ append = false, pageEvents = [], preserveItems = false } = {}) {
   if (append) {
-    elements.eventGrid.append(...pageEvents.map(createEventItem));
+    const offset = elements.eventGrid.children.length;
+    elements.eventGrid.append(
+      ...pageEvents.map((event, index) => createEventItem(event, offset + index)),
+    );
   } else if (!preserveItems) {
     elements.eventGrid.replaceChildren(...viewState.events.map(createEventItem));
   }

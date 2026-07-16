@@ -14,6 +14,7 @@ import subprocess
 import sys
 import threading
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from email.utils import formatdate
 from functools import lru_cache
 from http import HTTPStatus
@@ -61,8 +62,13 @@ EVENT_WINDOWS = {
 MAX_EVENT_PAGE_SIZE = 48
 MAX_ACTIVITY_BUCKETS = 14
 EVENT_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
-EVENT_THUMBNAIL_SIZE = (480, 270)
-EVENT_THUMBNAIL_QUALITY = 72
+EVENT_THUMBNAIL_SIZE = (320, 180)
+EVENT_THUMBNAIL_QUALITY = 70
+EVENT_THUMBNAIL_VERSION = 2
+EVENT_RESPONSE_CACHE_SECONDS = 60.0
+EVENT_RESPONSE_CACHE_SIZE = 32
+EVENT_THUMBNAIL_WORKERS = 3
+EVENT_THUMBNAIL_WARM_COUNT = 12
 IMMUTABLE_CACHE_SECONDS = 365 * 24 * 60 * 60
 SERVICE_STATUS_CACHE_SECONDS = 5.0
 LUMA_SAMPLE_SECONDS = 30.0
@@ -86,6 +92,25 @@ def frame_luma(image: Image.Image) -> float:
     return round(ImageStat.Stat(sample).mean[0], 1)
 
 
+def read_frame_metrics(
+    settings: Settings,
+    *,
+    snapshot_get: Callable[..., requests.Response] = requests.get,
+) -> tuple[int, int, float]:
+    response: requests.Response | None = None
+    try:
+        response = snapshot_get(settings.snapshot_url, timeout=settings.http_timeout)
+        response.raise_for_status()
+        with Image.open(io.BytesIO(response.content)) as image:
+            width, height = image.size
+            return width, height, frame_luma(image)
+    finally:
+        if response is not None:
+            close_response = getattr(response, "close", None)
+            if callable(close_response):
+                close_response()
+
+
 @lru_cache(maxsize=256)
 def event_thumbnail_bytes(path_text: str, _modified_ns: int, _size_bytes: int) -> bytes:
     with Image.open(path_text) as image:
@@ -97,6 +122,30 @@ def event_thumbnail_bytes(path_text: str, _modified_ns: int, _size_bytes: int) -
         output = io.BytesIO()
         image.save(output, format="JPEG", quality=EVENT_THUMBNAIL_QUALITY)
         return output.getvalue()
+
+
+@lru_cache(maxsize=32)
+def static_file_bytes(
+    path_text: str,
+    _modified_ns: int,
+    _size_bytes: int,
+    gzip_encoded: bool,
+) -> bytes:
+    body = Path(path_text).read_bytes()
+    if gzip_encoded:
+        return gzip.compress(body, compresslevel=5, mtime=0)
+    return body
+
+
+def warm_static_assets() -> None:
+    for target in STATIC_DIR.iterdir():
+        if not target.is_file():
+            continue
+        stat = target.stat()
+        body = static_file_bytes(str(target), stat.st_mtime_ns, stat.st_size, False)
+        content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+        if len(body) >= MIN_GZIP_BYTES and compressible_content_type(content_type):
+            static_file_bytes(str(target), stat.st_mtime_ns, stat.st_size, True)
 
 
 def directory_signature(directory: Path) -> tuple[int, int] | None:
@@ -141,15 +190,23 @@ def collect_dashboard_status(
     }
     warnings: list[str] = []
 
+    response: requests.Response | None = None
+    cached_width, cached_height, cached_luma = cached_frame_metrics or (None, None, None)
+    needs_image = sample_luma or any(
+        value is None for value in (cached_width, cached_height, cached_luma)
+    )
     try:
-        response = snapshot_get(settings.snapshot_url, timeout=settings.http_timeout)
+        response = snapshot_get(
+            settings.snapshot_url,
+            timeout=settings.http_timeout,
+            stream=not needs_image,
+        )
         response.raise_for_status()
         content_type = response.headers.get("content-type", "")
-        cached_width, cached_height, cached_luma = cached_frame_metrics or (None, None, None)
         width = positive_header_int(response.headers, "x-ustreamer-width") or cached_width
         height = positive_header_int(response.headers, "x-ustreamer-height") or cached_height
         mean_luma = cached_luma
-        if sample_luma or width is None or height is None:
+        if needs_image:
             with Image.open(io.BytesIO(response.content)) as image:
                 width, height = image.size
                 if sample_luma or mean_luma is None:
@@ -185,6 +242,11 @@ def collect_dashboard_status(
         feed["latency_ms"] = round((time.monotonic() - started) * 1000)
         feed["error"] = str(exc)
         warnings.append("camera snapshot is unavailable")
+    finally:
+        if response is not None:
+            close_response = getattr(response, "close", None)
+            if callable(close_response):
+                close_response()
 
     if feed["stale"]:
         warnings.append(
@@ -441,7 +503,7 @@ def event_history(
             "url": f"/events/{quote(path.name)}",
             "thumbnail_url": (
                 f"/events/thumbnails/{quote(path.name)}"
-                f"?v={int(timestamp * 1000)}-{size}"
+                f"?v={int(timestamp * 1000)}-{size}-{EVENT_THUMBNAIL_VERSION}"
             ),
             "captured_at": dt.datetime.fromtimestamp(timestamp, dt.timezone.utc).isoformat(),
             "size_bytes": size,
@@ -597,18 +659,35 @@ class DashboardApplication:
         self._power_at = 0.0
         self._frame_metrics: tuple[int, int, float] | None = None
         self._frame_metrics_at = 0.0
+        self._frame_metrics_refreshing = False
         self._archive_cache_ready = False
         self._archive_files: tuple[ArchiveFile, ...] = ()
         self._archive_signature: tuple[int, int] | None = None
+        self._event_responses: dict[
+            tuple[object, ...],
+            tuple[float, dict[str, object]],
+        ] = {}
         self._services: dict[str, dict[str, object]] | None = None
         self._services_at = 0.0
+        self._services_refreshing = False
+        self._service_generation = 0
+        self._thumbnail_executor = ThreadPoolExecutor(
+            max_workers=EVENT_THUMBNAIL_WORKERS,
+            thread_name_prefix="sentinel-thumbnail",
+        )
+        self._thumbnail_futures: dict[tuple[str, int, int], Future[bytes]] = {}
+        self._warmup_thread: threading.Thread | None = None
+        self._closed = False
         self._camera_lock = threading.RLock()
+        self._close_lock = threading.RLock()
         self._event_lock = threading.RLock()
         self._mask_lock = threading.RLock()
         self._policy_lock = threading.RLock()
         self._recovery_lock = threading.RLock()
         self._service_lock = threading.RLock()
         self._status_lock = threading.RLock()
+        self._thumbnail_lock = threading.RLock()
+        self._warmup_lock = threading.RLock()
 
     def status(self) -> dict:
         with self._status_lock:
@@ -618,9 +697,10 @@ class DashboardApplication:
             if self._power is None or now - self._power_at >= 60:
                 self._power = read_power_status()
                 self._power_at = now
-            sample_luma = (
-                self._frame_metrics is None
-                or now - self._frame_metrics_at >= LUMA_SAMPLE_SECONDS
+            sample_luma = self._frame_metrics is None
+            refresh_luma = (
+                self._frame_metrics is not None
+                and now - self._frame_metrics_at >= LUMA_SAMPLE_SECONDS
             )
             self._status = collect_dashboard_status(
                 self.settings,
@@ -641,7 +721,45 @@ class DashboardApplication:
                 if sample_luma:
                     self._frame_metrics_at = now
             self._status_at = now
+            if refresh_luma:
+                self._schedule_frame_metrics_refresh()
             return self._status
+
+    def _schedule_frame_metrics_refresh(self) -> None:
+        with self._status_lock:
+            if self._frame_metrics_refreshing or self._closed:
+                return
+            self._frame_metrics_refreshing = True
+        threading.Thread(
+            target=self._refresh_frame_metrics,
+            name="sentinel-frame-metrics",
+            daemon=True,
+        ).start()
+
+    def _refresh_frame_metrics(self) -> None:
+        try:
+            metrics = read_frame_metrics(self.settings)
+        except (requests.RequestException, OSError, ValueError) as exc:
+            LOG.debug("dashboard frame metric refresh failed: %s", exc)
+        else:
+            with self._status_lock:
+                self._frame_metrics = metrics
+                self._frame_metrics_at = time.monotonic()
+                if self._status is not None:
+                    status = dict(self._status)
+                    feed = dict(status["feed"])
+                    feed.update(
+                        {
+                            "width": metrics[0],
+                            "height": metrics[1],
+                            "mean_luma": metrics[2],
+                        }
+                    )
+                    status["feed"] = feed
+                    self._status = status
+        finally:
+            with self._status_lock:
+                self._frame_metrics_refreshing = False
 
     def archive_snapshot(self) -> tuple[ArchiveFile, ...]:
         signature = directory_signature(self.settings.output_dir)
@@ -656,6 +774,7 @@ class DashboardApplication:
             self._archive_files = files
             self._archive_signature = refreshed_signature
             self._archive_cache_ready = True
+            self._event_responses.clear()
             return files
 
     def events(
@@ -667,16 +786,128 @@ class DashboardApplication:
         period_start: float | None,
         period_end: float | None,
     ) -> dict[str, object]:
-        return event_history(
-            self.settings.output_dir,
-            window=window,
-            limit=limit,
-            before=before,
-            period_start=period_start,
-            period_end=period_end,
-            retention_policy=policy_from_settings(self.settings),
-            archive=self.archive_snapshot(),
+        with self._event_lock:
+            archive = self.archive_snapshot()
+            cache_key = (
+                self._archive_signature,
+                window,
+                limit,
+                before,
+                period_start,
+                period_end,
+            )
+            now = time.monotonic()
+            cached = self._event_responses.get(cache_key)
+            if cached is not None and now - cached[0] < EVENT_RESPONSE_CACHE_SECONDS:
+                return cached[1]
+            payload = event_history(
+                self.settings.output_dir,
+                window=window,
+                limit=limit,
+                before=before,
+                period_start=period_start,
+                period_end=period_end,
+                retention_policy=policy_from_settings(self.settings),
+                archive=archive,
+            )
+            self._event_responses.pop(cache_key, None)
+            self._event_responses[cache_key] = (now, payload)
+            while len(self._event_responses) > EVENT_RESPONSE_CACHE_SIZE:
+                self._event_responses.pop(next(iter(self._event_responses)))
+            return payload
+
+    @staticmethod
+    def _thumbnail_key(target: Path, stat: os.stat_result) -> tuple[str, int, int]:
+        return str(target), stat.st_mtime_ns, stat.st_size
+
+    def _thumbnail_future(
+        self,
+        target: Path,
+        stat: os.stat_result,
+    ) -> tuple[tuple[str, int, int], Future[bytes]]:
+        key = self._thumbnail_key(target, stat)
+        with self._thumbnail_lock:
+            future = self._thumbnail_futures.get(key)
+            if future is None:
+                future = self._thumbnail_executor.submit(event_thumbnail_bytes, *key)
+                self._thumbnail_futures[key] = future
+            return key, future
+
+    def _forget_thumbnail_future(
+        self,
+        key: tuple[str, int, int],
+        future: Future[bytes],
+    ) -> None:
+        with self._thumbnail_lock:
+            if self._thumbnail_futures.get(key) is future and future.done():
+                self._thumbnail_futures.pop(key, None)
+
+    def event_thumbnail(self, target: Path, stat: os.stat_result) -> bytes:
+        key, future = self._thumbnail_future(target, stat)
+        try:
+            return future.result()
+        finally:
+            self._forget_thumbnail_future(key, future)
+
+    def _warm_event_caches(self) -> None:
+        archive = self.archive_snapshot()
+        self.events(
+            window="24h",
+            limit=12,
+            before=None,
+            period_start=None,
+            period_end=None,
         )
+        pending: list[tuple[tuple[str, int, int], Future[bytes]]] = []
+        for file in archive:
+            if len(pending) >= EVENT_THUMBNAIL_WARM_COUNT:
+                break
+            if file.path.suffix.lower() not in EVENT_IMAGE_SUFFIXES:
+                continue
+            try:
+                pending.append(self._thumbnail_future(file.path, file.path.stat()))
+            except OSError:
+                continue
+        for key, future in pending:
+            try:
+                future.result()
+            except (OSError, RuntimeError):
+                continue
+            finally:
+                self._forget_thumbnail_future(key, future)
+
+    def _warm_caches(self) -> None:
+        started = time.monotonic()
+        actions = (
+            ("static assets", warm_static_assets),
+            ("status", self.status),
+            ("services", self.services),
+            ("event archive", self._warm_event_caches),
+        )
+        for label, action in actions:
+            try:
+                action()
+            except Exception as exc:  # Warmup is best effort and must not stop the server.
+                LOG.debug("dashboard %s warmup failed: %s", label, exc)
+        LOG.debug("dashboard caches warmed in %.1f ms", (time.monotonic() - started) * 1000)
+
+    def start_warmup(self) -> threading.Thread:
+        with self._warmup_lock:
+            if self._warmup_thread is None:
+                self._warmup_thread = threading.Thread(
+                    target=self._warm_caches,
+                    name="sentinel-dashboard-warmup",
+                    daemon=True,
+                )
+                self._warmup_thread.start()
+            return self._warmup_thread
+
+    def close(self) -> None:
+        with self._close_lock:
+            if self._closed:
+                return
+            self._closed = True
+            self._thumbnail_executor.shutdown(wait=False, cancel_futures=True)
 
     def camera(self) -> dict[str, object]:
         with self._camera_lock:
@@ -749,19 +980,49 @@ class DashboardApplication:
                     self._status_at = 0.0
             return updated.to_dict()
 
+    def _read_services(self) -> dict[str, dict[str, object]]:
+        names = {
+            "motion": self.settings.motion_service,
+            "recovery": self.settings.recovery_service,
+            "health": self.settings.health_service,
+            "watchdog": self.settings.exposure_service,
+        }
+        states = service_states(names.values())
+        return {service_id: states[name] for service_id, name in names.items()}
+
+    def _refresh_services(self, generation: int) -> None:
+        try:
+            services = self._read_services()
+        except Exception as exc:  # The cached state remains usable if systemd is transiently busy.
+            LOG.debug("dashboard service refresh failed: %s", exc)
+        else:
+            with self._service_lock:
+                if generation == self._service_generation:
+                    self._services = services
+                    self._services_at = time.monotonic()
+        finally:
+            with self._service_lock:
+                self._services_refreshing = False
+
+    def _schedule_service_refresh(self) -> None:
+        if self._services_refreshing or self._closed:
+            return
+        self._services_refreshing = True
+        threading.Thread(
+            target=self._refresh_services,
+            args=(self._service_generation,),
+            name="sentinel-service-status",
+            daemon=True,
+        ).start()
+
     def services(self) -> dict[str, dict[str, object]]:
         with self._service_lock:
             now = time.monotonic()
-            if self._services is not None and now - self._services_at < SERVICE_STATUS_CACHE_SECONDS:
+            if self._services is not None:
+                if now - self._services_at >= SERVICE_STATUS_CACHE_SECONDS:
+                    self._schedule_service_refresh()
                 return self._services
-            names = {
-                "motion": self.settings.motion_service,
-                "recovery": self.settings.recovery_service,
-                "health": self.settings.health_service,
-                "watchdog": self.settings.exposure_service,
-            }
-            states = service_states(names.values())
-            self._services = {service_id: states[name] for service_id, name in names.items()}
+            self._services = self._read_services()
             self._services_at = time.monotonic()
             return self._services
 
@@ -778,6 +1039,7 @@ class DashboardApplication:
             raise ValueError("unknown service") from exc
         with self._service_lock:
             state = set_service_active(service_name, active)
+            self._service_generation += 1
             self._services = None
             self._services_at = 0.0
             return state
@@ -797,6 +1059,10 @@ class DashboardHTTPServer(ThreadingHTTPServer):
             LOG.debug("dashboard client %s disconnected", client_address[0])
             return
         super().handle_error(request, client_address)
+
+    def server_close(self) -> None:
+        super().server_close()
+        self.app.close()
 
 
 class DashboardRequestHandler(BaseHTTPRequestHandler):
@@ -835,6 +1101,7 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         content_disposition: str | None = None,
         etag: str | None = None,
         last_modified: str | None = None,
+        precompressed_body: bytes | None = None,
     ) -> None:
         vary_encoding = compressible_content_type(content_type)
         use_gzip = (
@@ -858,7 +1125,7 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             return
 
         if use_gzip:
-            body = gzip.compress(body, compresslevel=5, mtime=0)
+            body = precompressed_body or gzip.compress(body, compresslevel=5, mtime=0)
 
         self.send_response(status)
         self.send_header("Content-Type", content_type)
@@ -1043,71 +1310,87 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
 
     def send_policy_state(self) -> None:
         try:
-            self.send_json(self.app.alert_policy())
+            payload = self.app.alert_policy()
         except (OSError, ValueError) as exc:
             LOG.warning("alert policy read failed: %s", exc)
             self.send_json({"error": "alert policy is unavailable"}, HTTPStatus.SERVICE_UNAVAILABLE)
+        else:
+            self.send_json(payload)
 
     def send_motion_masks_state(self) -> None:
         try:
-            self.send_json(self.app.motion_masks())
+            payload = self.app.motion_masks()
         except (OSError, ValueError) as exc:
             LOG.warning("motion mask read failed: %s", exc)
             self.send_json({"error": "motion masks are unavailable"}, HTTPStatus.SERVICE_UNAVAILABLE)
+        else:
+            self.send_json(payload)
 
     def run_camera_action(self, action: Callable[[], dict[str, object]]) -> None:
         try:
-            self.send_json(action())
+            payload = action()
         except ValueError as exc:
             self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
         except (OSError, subprocess.SubprocessError) as exc:
             LOG.warning("camera control action failed: %s", exc)
             self.send_json({"error": "camera controls are unavailable"}, HTTPStatus.SERVICE_UNAVAILABLE)
+        else:
+            self.send_json(payload)
 
     def run_service_action(self, action: Callable[[], dict[str, object]]) -> None:
         try:
-            self.send_json(action())
+            payload = action()
         except ValueError as exc:
             self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
         except (OSError, subprocess.SubprocessError) as exc:
             LOG.warning("service control action failed: %s", exc)
             self.send_json({"error": "service control is unavailable"}, HTTPStatus.SERVICE_UNAVAILABLE)
+        else:
+            self.send_json(payload)
 
     def run_policy_action(self, action: Callable[[], dict[str, object]]) -> None:
         try:
-            self.send_json(action())
+            payload = action()
         except ValueError as exc:
             self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
         except OSError as exc:
             LOG.warning("alert policy write failed: %s", exc)
             self.send_json({"error": "alert policy is unavailable"}, HTTPStatus.SERVICE_UNAVAILABLE)
+        else:
+            self.send_json(payload)
 
     def run_motion_masks_action(self, action: Callable[[], dict[str, object]]) -> None:
         try:
-            self.send_json(action())
+            payload = action()
         except ValueError as exc:
             self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
         except OSError as exc:
             LOG.warning("motion mask write failed: %s", exc)
             self.send_json({"error": "motion masks are unavailable"}, HTTPStatus.SERVICE_UNAVAILABLE)
+        else:
+            self.send_json(payload)
 
     def run_webhook_action(self, action: Callable[[], dict[str, object]]) -> None:
         try:
-            self.send_json(action())
+            payload = action()
         except ValueError as exc:
             self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
         except requests.RequestException as exc:
             LOG.warning("Home Assistant webhook test failed: %s", exc)
             self.send_json({"error": "Home Assistant webhook delivery failed"}, HTTPStatus.BAD_GATEWAY)
+        else:
+            self.send_json(payload)
 
     def run_recovery_action(self, action: Callable[[], dict[str, object]]) -> None:
         try:
-            self.send_json(action())
+            payload = action()
         except ValueError as exc:
             self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
         except (OSError, subprocess.SubprocessError) as exc:
             LOG.warning("manual feed recovery failed: %s", exc)
             self.send_json({"error": "feed restart is unavailable"}, HTTPStatus.SERVICE_UNAVAILABLE)
+        else:
+            self.send_json(payload)
 
     def serve_static(self, name: str) -> None:
         target = (STATIC_DIR / name).resolve()
@@ -1116,11 +1399,27 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             return
         try:
             stat = target.stat()
-            body = target.read_bytes()
+            body = static_file_bytes(str(target), stat.st_mtime_ns, stat.st_size, False)
         except OSError:
             self.send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
             return
         content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+        precompressed_body = None
+        if (
+            len(body) >= MIN_GZIP_BYTES
+            and compressible_content_type(content_type)
+            and accepts_gzip(self.headers.get("Accept-Encoding"))
+        ):
+            try:
+                precompressed_body = static_file_bytes(
+                    str(target),
+                    stat.st_mtime_ns,
+                    stat.st_size,
+                    True,
+                )
+            except OSError:
+                self.send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+                return
         self.send_bytes(
             HTTPStatus.OK,
             content_type,
@@ -1132,6 +1431,7 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             ),
             etag=file_etag(stat),
             last_modified=formatdate(stat.st_mtime, usegmt=True),
+            precompressed_body=precompressed_body,
         )
 
     def event_target(self, name: str) -> Path | None:
@@ -1160,8 +1460,8 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             return
         try:
             stat = target.stat()
-            body = event_thumbnail_bytes(str(target), stat.st_mtime_ns, stat.st_size)
-        except OSError:
+            body = self.app.event_thumbnail(target, stat)
+        except (OSError, RuntimeError):
             self.send_json({"error": "thumbnail unavailable"}, HTTPStatus.SERVICE_UNAVAILABLE)
             return
         self.send_bytes(
@@ -1169,7 +1469,7 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             "image/jpeg",
             body,
             cache_control=f"private, max-age={IMMUTABLE_CACHE_SECONDS}, immutable",
-            etag=file_etag(stat, "thumb-v1"),
+            etag=file_etag(stat, f"thumb-v{EVENT_THUMBNAIL_VERSION}"),
             last_modified=formatdate(stat.st_mtime, usegmt=True),
         )
 
@@ -1179,23 +1479,39 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
                 self.send_header(name, value)
 
     def proxy_snapshot(self, query: str, *, download: bool) -> None:
+        response_started = False
         try:
-            response = requests.get(
+            with requests.get(
                 with_query(self.app.settings.snapshot_url, query),
+                stream=True,
                 timeout=self.app.settings.http_timeout,
-            )
-            response.raise_for_status()
+            ) as response:
+                response.raise_for_status()
+                self.send_response(response.status_code)
+                self.copy_proxy_headers(response)
+                if download:
+                    stamp = dt.datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
+                    self.send_header(
+                        "Content-Disposition",
+                        f'attachment; filename="sentinel-{stamp}.jpg"',
+                    )
+                self.end_headers()
+                response_started = True
+                if self.command == "HEAD":
+                    return
+                for chunk in response.iter_content(chunk_size=64 * 1024):
+                    if chunk:
+                        self.wfile.write(chunk)
+        except (BrokenPipeError, ConnectionResetError):
+            LOG.debug("snapshot client disconnected")
         except requests.RequestException as exc:
-            self.send_json({"error": f"snapshot upstream unavailable: {exc}"}, HTTPStatus.BAD_GATEWAY)
-            return
-        self.send_response(response.status_code)
-        self.copy_proxy_headers(response)
-        if download:
-            stamp = dt.datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
-            self.send_header("Content-Disposition", f'attachment; filename="sentinel-{stamp}.jpg"')
-        self.end_headers()
-        if self.command != "HEAD":
-            self.wfile.write(response.content)
+            if response_started:
+                LOG.debug("snapshot connection ended: %s", exc)
+            else:
+                self.send_json(
+                    {"error": f"snapshot upstream unavailable: {exc}"},
+                    HTTPStatus.BAD_GATEWAY,
+                )
 
     def proxy_stream(self, query: str) -> None:
         response_started = False
@@ -1236,6 +1552,7 @@ def serve_dashboard(settings: Settings) -> None:
         settings.dashboard_port,
         settings.stream_url,
     )
+    app.start_warmup()
     try:
         server.serve_forever(poll_interval=0.5)
     except KeyboardInterrupt:

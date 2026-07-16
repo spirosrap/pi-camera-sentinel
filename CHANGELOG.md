@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.11.0 - 2026-07-16
+
+- Read only upstream snapshot headers between brightness samples instead of transferring every JPEG.
+- Stream proxied snapshots to the browser as they arrive rather than buffering the complete image first.
+- Reduce gallery previews to a versioned 320 x 180 fast path while preserving original captures.
+- Bound thumbnail generation to three workers and coalesce duplicate requests for the same frame.
+- Warm static assets, status, service state, event metadata, and the newest gallery previews at startup.
+- Cache compressed static representations instead of rereading and recompressing assets per request.
+- Cache unchanged event responses for one minute and invalidate them as soon as the archive changes.
+- Refresh expired brightness samples and service state outside interactive request threads.
+- Prioritize the first visible gallery row and keep later previews at low browser priority.
+- Keep expected browser disconnects out of policy, mask, and camera failure logs.
+- Add regression coverage for streamed status probes, static representation caching, event invalidation, and thumbnail single-flight behavior.
+
 ## 1.10.0 - 2026-07-16
 
 - Prioritize the live stream and defer below-the-fold dashboard work until it approaches view.

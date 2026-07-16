@@ -1,6 +1,8 @@
+import gzip
 import io
 import os
 import threading
+import time
 from dataclasses import replace
 
 import pytest
@@ -11,6 +13,7 @@ from pi_camera_sentinel.config import Settings
 from pi_camera_sentinel.dashboard import (
     DashboardApplication,
     DashboardHTTPServer,
+    DashboardRequestHandler,
     accepts_gzip,
     collect_dashboard_status,
     event_history,
@@ -18,6 +21,7 @@ from pi_camera_sentinel.dashboard import (
     list_recent_events,
     parse_event_query,
     same_origin,
+    static_file_bytes,
     with_query,
 )
 from pi_camera_sentinel.health import power_status_from_flags
@@ -36,10 +40,14 @@ class FakeResponse:
         self.content = content
         self.headers = headers
         self.status_code = status_code
+        self.closed = False
 
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
             raise requests.HTTPError(f"HTTP {self.status_code}")
+
+    def close(self) -> None:
+        self.closed = True
 
 
 def jpeg_bytes(color: tuple[int, int, int] = (120, 120, 120)) -> bytes:
@@ -130,11 +138,16 @@ def test_collect_dashboard_status_reuses_recent_frame_metrics(monkeypatch, tmp_p
         raise AssertionError("unexpected decode")
 
     monkeypatch.setattr("pi_camera_sentinel.dashboard.Image.open", fail_open)
+    observed = {}
+
+    def read_snapshot(*_args, **kwargs):
+        observed.update(kwargs)
+        return response
 
     result = collect_dashboard_status(
         dashboard_settings(tmp_path),
         power_status=power_status(),
-        snapshot_get=lambda *_args, **_kwargs: response,
+        snapshot_get=read_snapshot,
         cached_frame_metrics=(1280, 720, 137.5),
         sample_luma=False,
     )
@@ -143,6 +156,39 @@ def test_collect_dashboard_status_reuses_recent_frame_metrics(monkeypatch, tmp_p
     assert result["feed"]["height"] == 720
     assert result["feed"]["mean_luma"] == 137.5
     assert result["feed"]["online"] is True
+    assert observed["stream"] is True
+    assert response.closed is True
+
+
+def test_dashboard_status_refreshes_stale_luma_off_request_thread(monkeypatch, tmp_path):
+    app = DashboardApplication(dashboard_settings(tmp_path))
+    app._frame_metrics = (1280, 720, 111.0)
+    app._frame_metrics_at = time.monotonic() - 31.0
+    app._power = power_status()
+    app._power_at = time.monotonic()
+    observed = []
+    scheduled = []
+
+    def collect(_settings, **kwargs):
+        observed.append(kwargs)
+        return {
+            "feed": {
+                "ok": True,
+                "width": 1280,
+                "height": 720,
+                "mean_luma": 111.0,
+            }
+        }
+
+    monkeypatch.setattr("pi_camera_sentinel.dashboard.collect_dashboard_status", collect)
+    monkeypatch.setattr(app, "_schedule_frame_metrics_refresh", lambda: scheduled.append(True))
+
+    result = app.status()
+
+    assert result["feed"]["mean_luma"] == 111.0
+    assert observed[0]["sample_luma"] is False
+    assert observed[0]["cached_frame_metrics"] == (1280, 720, 111.0)
+    assert scheduled == [True]
 
 
 def test_collect_dashboard_status_marks_active_power_limit_as_degraded(tmp_path):
@@ -286,6 +332,7 @@ def test_list_recent_events_sorts_and_filters(tmp_path):
     assert [event["name"] for event in events] == ["motion-newer.jpg", "motion-older.jpg"]
     assert events[0]["url"] == "/events/motion-newer.jpg"
     assert events[0]["thumbnail_url"].startswith("/events/thumbnails/motion-newer.jpg?v=")
+    assert events[0]["thumbnail_url"].endswith("-2")
 
 
 def test_event_thumbnail_is_small_bounded_jpeg(tmp_path):
@@ -297,8 +344,24 @@ def test_event_thumbnail_is_small_bounded_jpeg(tmp_path):
 
     with Image.open(io.BytesIO(thumbnail)) as image:
         assert image.format == "JPEG"
-        assert image.size == (480, 270)
+        assert image.size == (320, 180)
     assert len(thumbnail) < stat.st_size
+
+
+def test_static_file_bytes_caches_compressed_representation(tmp_path):
+    source = tmp_path / "asset.js"
+    source.write_bytes(b"const value = 1;\n" * 100)
+    stat = source.stat()
+    static_file_bytes.cache_clear()
+
+    first = static_file_bytes(str(source), stat.st_mtime_ns, stat.st_size, True)
+    before = static_file_bytes.cache_info()
+    second = static_file_bytes(str(source), stat.st_mtime_ns, stat.st_size, True)
+    after = static_file_bytes.cache_info()
+
+    assert gzip.decompress(first) == source.read_bytes()
+    assert second is first
+    assert after.hits == before.hits + 1
 
 
 def test_accepts_gzip_honors_explicit_quality():
@@ -333,6 +396,32 @@ def test_static_assets_are_compressed_and_conditionally_cached(dashboard_server)
     assert cached.content == b""
 
 
+def test_client_disconnect_is_not_reclassified_as_policy_failure():
+    handler = object.__new__(DashboardRequestHandler)
+
+    class App:
+        @staticmethod
+        def alert_policy():
+            return {"quiet_hours_enabled": False}
+
+    class Server:
+        app = App()
+
+    handler.server = Server()
+    sends = []
+
+    def disconnect(*args, **kwargs):
+        sends.append((args, kwargs))
+        raise BrokenPipeError("browser left")
+
+    handler.send_json = disconnect
+
+    with pytest.raises(BrokenPipeError, match="browser left"):
+        handler.send_policy_state()
+
+    assert len(sends) == 1
+
+
 def test_thumbnail_route_serves_cached_preview(dashboard_server):
     base_url, settings = dashboard_server
     source = settings.output_dir / "motion-route.jpg"
@@ -348,7 +437,44 @@ def test_thumbnail_route_serves_cached_preview(dashboard_server):
     assert "immutable" in response.headers["Cache-Control"]
     assert len(response.content) < source.stat().st_size
     with Image.open(io.BytesIO(response.content)) as image:
-        assert image.size == (480, 270)
+        assert image.size == (320, 180)
+
+
+def test_dashboard_coalesces_duplicate_thumbnail_work(monkeypatch, tmp_path):
+    source = tmp_path / "motion-shared.jpg"
+    source.write_bytes(jpeg_bytes())
+    stat = source.stat()
+    app = DashboardApplication(dashboard_settings(tmp_path))
+    calls = []
+    started = threading.Event()
+    release = threading.Event()
+
+    def generate(*key):
+        calls.append(key)
+        started.set()
+        assert release.wait(timeout=1)
+        return b"thumbnail"
+
+    monkeypatch.setattr("pi_camera_sentinel.dashboard.event_thumbnail_bytes", generate)
+    results = []
+    workers = [
+        threading.Thread(target=lambda: results.append(app.event_thumbnail(source, stat)))
+        for _ in range(2)
+    ]
+    try:
+        for worker in workers:
+            worker.start()
+        assert started.wait(timeout=1)
+        time.sleep(0.05)
+        release.set()
+        for worker in workers:
+            worker.join(timeout=1)
+    finally:
+        release.set()
+        app.close()
+
+    assert results == [b"thumbnail", b"thumbnail"]
+    assert len(calls) == 1
 
 
 def test_event_history_filters_summarizes_and_paginates(tmp_path):
@@ -614,6 +740,14 @@ def test_dashboard_services_include_feed_recovery(monkeypatch, tmp_path):
         )
     ]
 
+    scheduled = []
+    app._services_at = time.monotonic() - 6.0
+    monkeypatch.setattr(app, "_schedule_service_refresh", lambda: scheduled.append(True))
+
+    assert app.services() is services
+    assert scheduled == [True]
+    assert len(observed) == 1
+
 
 def test_dashboard_reuses_archive_scan_until_directory_changes(monkeypatch, tmp_path):
     first = tmp_path / "motion-first.jpg"
@@ -644,6 +778,7 @@ def test_dashboard_reuses_archive_scan_until_directory_changes(monkeypatch, tmp_
     )
     assert first_result["summary"]["retained_count"] == 1
     assert second_result["summary"]["retained_count"] == 1
+    assert second_result is first_result
     assert len(scans) == 1
 
     (tmp_path / "motion-second.jpg").write_bytes(b"second")
@@ -657,6 +792,7 @@ def test_dashboard_reuses_archive_scan_until_directory_changes(monkeypatch, tmp_
     )
 
     assert changed["summary"]["retained_count"] == 2
+    assert changed is not first_result
     assert len(scans) == 2
 
 

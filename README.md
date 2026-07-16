@@ -161,7 +161,7 @@ The event API at `/api/events` accepts a validated `window` (`24h`, `7d`, or `al
 
 Selecting a retained event opens a continuous review viewer with keyboard navigation, automatic page loading, and original-file download. See [docs/archive-review.md](docs/archive-review.md).
 
-The dashboard keeps the live view on the critical path, defers lower sections until they approach the viewport, compresses text responses, and serves bounded in-memory event thumbnails while retaining original captures unchanged. See [docs/performance.md](docs/performance.md).
+The dashboard keeps the live view on the critical path, defers lower sections until they approach the viewport, prewarms its newest 320 x 180 gallery previews, and refreshes slower Pi probes away from interactive requests while retaining original captures unchanged. See [docs/performance.md](docs/performance.md).
 
 The server proxies `/stream` and `/snapshot` to `ustreamer`, which keeps the raw camera port private when Tailscale Serve points at the dashboard.
 
