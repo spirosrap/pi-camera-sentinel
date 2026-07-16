@@ -20,6 +20,7 @@ This project is intentionally small: no cloud camera account, no public port for
 - Provides camera profiles for common USB webcam exposure issues.
 - Can automatically switch between day and low-light exposure profiles.
 - Automatically restarts an unavailable or stale feed after repeated failed checks.
+- Automatically reconnects open dashboards after stream, network, or tab-suspension interruptions.
 - Records recent feed outages, restart attempts, and successful recoveries.
 - Includes health checks for feed availability, live Pi power throttling, and storage.
 - Reports low storage, CPU temperature, frame freshness, and camera availability.
@@ -124,6 +125,7 @@ See [docs/tailscale.md](docs/tailscale.md).
 The `pi-camera-sentinel serve` command provides a small same-origin web app on port `8090`. It includes:
 
 - live, pause, reconnect, snapshot, and fullscreen controls
+- pause-aware automatic stream retries with visible reconnect status
 - current frame age, resolution, dropped-frame count, and exposure level
 - camera, live Raspberry Pi power flags, temperature, uptime, and storage status
 - motion-alert and exposure-recovery state with pause and resume toggles
@@ -165,6 +167,8 @@ SENTINEL_RECOVERY_COOLDOWN_SECONDS=120
 ```
 
 A failed HTTP request, non-image or empty response, explicit ustreamer offline signal, or frame timestamp older than the stale limit counts as a failure. Identical pixels do not count as stale, so a still scene cannot cause a restart loop. Recovery state, restart totals, and the 20 most recent incidents are stored atomically in `SENTINEL_RECOVERY_STATE_FILE` and displayed in the dashboard. The dashboard also provides a guarded **Restart feed** action for immediate intervention.
+
+Open dashboard tabs recover separately from the Pi watchdog. An interrupted browser stream retries after 1, 2, 4, 8, 16, and then at most 30 seconds. It reconnects immediately when the status API or browser reports recovery, and refreshes after a tab has been hidden for at least 15 seconds. Pausing the live view cancels and suppresses retries until it is resumed.
 
 Run one check manually with `pi-camera-sentinel recovery-step --json`. See [docs/recovery.md](docs/recovery.md).
 

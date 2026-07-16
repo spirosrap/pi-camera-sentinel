@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.4.0 - 2026-07-16
+
+- Classify snapshots older than the configured recovery threshold as stale.
+- Keep stale frames from reporting the dashboard and health endpoint as online.
+- Retry interrupted browser streams with bounded exponential backoff.
+- Reconnect immediately after camera or network recovery.
+- Refresh the stream when a long-hidden dashboard tab becomes visible again.
+- Keep Pause authoritative by suppressing all automatic reconnect attempts.
+- Expose explicit viewer states for connecting, live, retrying, offline, and paused sessions.
+
 ## 1.3.0 - 2026-07-15
 
 - Add deterministic archive retention limits by file count, age, and total size.

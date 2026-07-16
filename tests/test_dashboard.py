@@ -77,6 +77,7 @@ def test_collect_dashboard_status_for_online_feed(tmp_path):
     assert result["feed"]["height"] == 720
     assert result["feed"]["mean_luma"] == 120.0
     assert result["feed"]["dropped_frames"] == 0
+    assert result["feed"]["stale"] is False
     assert result["automation"]["alert_batching"] == {
         "enabled": True,
         "window_seconds": 8.0,
@@ -131,6 +132,32 @@ def test_collect_dashboard_status_marks_failed_snapshot_offline(tmp_path):
     assert result["state"] == "offline"
     assert result["ok"] is False
     assert result["feed"]["error"] == "camera stopped"
+
+
+def test_collect_dashboard_status_marks_old_frame_offline(monkeypatch, tmp_path):
+    response = FakeResponse(
+        jpeg_bytes(),
+        {
+            "content-type": "image/jpeg",
+            "x-timestamp": "100.0",
+            "x-ustreamer-online": "true",
+        },
+    )
+    settings = replace(dashboard_settings(tmp_path), recovery_stale_seconds=20)
+    monkeypatch.setattr("pi_camera_sentinel.dashboard.time.time", lambda: 125.5)
+
+    result = collect_dashboard_status(
+        settings,
+        power_status=power_status(),
+        snapshot_get=lambda *_args, **_kwargs: response,
+    )
+
+    assert result["state"] == "offline"
+    assert result["ok"] is False
+    assert result["feed"]["online"] is True
+    assert result["feed"]["stale"] is True
+    assert result["feed"]["frame_age_seconds"] == 25.5
+    assert "camera frame is older than 20 seconds" in result["warnings"]
 
 
 def test_list_recent_events_sorts_and_filters(tmp_path):

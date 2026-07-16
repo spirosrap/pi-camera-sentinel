@@ -87,6 +87,7 @@ def collect_dashboard_status(
         "height": None,
         "frame_timestamp": None,
         "frame_age_seconds": None,
+        "stale": False,
         "latency_ms": None,
         "dropped_frames": None,
         "mean_luma": None,
@@ -102,6 +103,11 @@ def collect_dashboard_status(
         image.load()
         timestamp = response.headers.get("x-timestamp")
         frame_timestamp = float(timestamp) if timestamp else None
+        frame_age_seconds = (
+            round(max(0.0, time.time() - frame_timestamp), 2)
+            if frame_timestamp is not None
+            else None
+        )
         dropped = response.headers.get("x-ustreamer-dropped")
         feed.update(
             {
@@ -112,10 +118,10 @@ def collect_dashboard_status(
                 "width": image.width,
                 "height": image.height,
                 "frame_timestamp": frame_timestamp,
-                "frame_age_seconds": (
-                    round(max(0.0, time.time() - frame_timestamp), 2)
-                    if frame_timestamp is not None
-                    else None
+                "frame_age_seconds": frame_age_seconds,
+                "stale": bool(
+                    frame_age_seconds is not None
+                    and frame_age_seconds > settings.recovery_stale_seconds
                 ),
                 "latency_ms": round((time.monotonic() - started) * 1000),
                 "dropped_frames": int(dropped) if dropped is not None else None,
@@ -126,6 +132,11 @@ def collect_dashboard_status(
         feed["latency_ms"] = round((time.monotonic() - started) * 1000)
         feed["error"] = str(exc)
         warnings.append("camera snapshot is unavailable")
+
+    if feed["stale"]:
+        warnings.append(
+            f"camera frame is older than {settings.recovery_stale_seconds:g} seconds"
+        )
 
     camera_exists = settings.camera_device == "auto" or Path(settings.camera_device).exists()
     if not camera_exists:
@@ -157,7 +168,7 @@ def collect_dashboard_status(
         )
         warnings.append("feed recovery state is unreadable")
 
-    feed_ok = bool(feed["ok"] and feed["online"])
+    feed_ok = bool(feed["ok"] and feed["online"] and not feed["stale"])
     if not feed_ok or not camera_exists:
         state = "offline"
     elif disk_low or power_status.state in {"active", "recovered", "recent"}:

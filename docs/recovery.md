@@ -55,3 +55,17 @@ Service names are validated before systemd is called. Recovery state contains no
 Use **Restart feed** in the private dashboard when the stream needs immediate intervention. The same-origin endpoint restarts only the service named by `SENTINEL_STREAM_SERVICE`; arbitrary service names are never accepted from the browser. A manual restart also starts the normal cooldown so it cannot combine with the watchdog into a rapid restart loop.
 
 The state file retains the 20 most recent feed failures, automatic or manual restart attempts, failed restarts, and successful recoveries. The dashboard shows the newest five. Existing v1.0 state files are upgraded in place when the next recovery event is written.
+
+## Browser Stream Recovery
+
+The system watchdog recovers the stream process on the Pi. Each open dashboard also maintains its own connection to that process, so it has a smaller client-side recovery loop:
+
+- interrupted streams retry after 1, 2, 4, 8, 16, and then at most 30 seconds
+- a status change from unavailable or stale to healthy reconnects immediately
+- a restored browser network connection reconnects immediately
+- a tab hidden for at least 15 seconds refreshes its stream when visible again
+- a successful frame resets the retry delay
+
+The live-view notice shows the current retry state. **Pause** cancels any pending timer and disables automatic reconnects until **Resume** is selected. This prevents the recovery loop from consuming bandwidth when the user intentionally stopped the live view.
+
+The dashboard status API uses `SENTINEL_RECOVERY_STALE_SECONDS` for the same stale-frame decision as the system watchdog. A stale snapshot can still be a valid image response, but it no longer reports the camera as online.

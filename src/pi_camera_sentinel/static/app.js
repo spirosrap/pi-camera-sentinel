@@ -107,7 +107,11 @@ const viewState = {
   recoveryState: null,
   serviceBusy: new Set(),
   serviceStates: {},
+  streamFeedOnline: null,
+  streamHiddenAt: null,
   streamLoaded: false,
+  streamReconnectAttempt: 0,
+  streamReconnectTimer: null,
   webhookBusy: false,
   webhookIntegration: null,
 };
@@ -145,6 +149,9 @@ const dateTime = new Intl.DateTimeFormat(undefined, {
 
 const relativeTime = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
 const minimumDrawnMaskSize = 0.02;
+const streamReconnectBaseMs = 1000;
+const streamReconnectMaxMs = 30000;
+const streamVisibilityReconnectMs = 15000;
 
 function formatBytes(bytes) {
   if (!Number.isFinite(bytes)) return "--";
@@ -205,17 +212,86 @@ function hideStreamNotice() {
   elements.streamNotice.hidden = true;
 }
 
-function startStream() {
+function clearStreamReconnect() {
+  if (viewState.streamReconnectTimer !== null) {
+    window.clearTimeout(viewState.streamReconnectTimer);
+    viewState.streamReconnectTimer = null;
+  }
+}
+
+function streamReconnectDelay(attempt) {
+  return Math.min(streamReconnectBaseMs * (2 ** Math.min(attempt, 5)), streamReconnectMaxMs);
+}
+
+function replaceStreamElement() {
+  const previous = elements.stream;
+  const replacement = previous.cloneNode(false);
+  replacement.removeAttribute("src");
+  previous.replaceWith(replacement);
+  elements.stream = replacement;
+  replacement.addEventListener("load", () => {
+    if (replacement !== elements.stream) return;
+    clearStreamReconnect();
+    viewState.streamReconnectAttempt = 0;
+    viewState.streamLoaded = true;
+    if (!viewState.paused) {
+      elements.streamShell.dataset.state = "live";
+      hideStreamNotice();
+    }
+  });
+  replacement.addEventListener("error", () => {
+    if (replacement !== elements.stream) return;
+    viewState.streamLoaded = false;
+    if (!viewState.paused) scheduleStreamReconnect("Camera stream interrupted");
+  });
+  return replacement;
+}
+
+function startStream({ resetBackoff = true, message = "Connecting to camera" } = {}) {
+  clearStreamReconnect();
+  if (resetBackoff) viewState.streamReconnectAttempt = 0;
   viewState.paused = false;
   viewState.streamLoaded = false;
   elements.pauseButton.textContent = "Pause";
-  showStreamNotice("Connecting to camera");
-  elements.stream.src = `/stream?advance_headers=1&dual_final_frames=1&t=${Date.now()}`;
+  elements.streamShell.dataset.state = "connecting";
+  showStreamNotice(message);
+  replaceStreamElement().src = `/stream?advance_headers=1&dual_final_frames=1&t=${Date.now()}`;
+}
+
+function scheduleStreamReconnect(message, { immediate = false } = {}) {
+  if (viewState.paused) return;
+  if (immediate) {
+    clearStreamReconnect();
+    viewState.streamReconnectAttempt = 0;
+  } else if (viewState.streamReconnectTimer !== null) {
+    return;
+  }
+  if (!navigator.onLine) {
+    elements.streamShell.dataset.state = "offline";
+    showStreamNotice("Network offline / waiting to reconnect");
+    return;
+  }
+
+  const delay = immediate ? 0 : streamReconnectDelay(viewState.streamReconnectAttempt);
+  if (!immediate) viewState.streamReconnectAttempt += 1;
+  elements.streamShell.dataset.state = "retrying";
+  showStreamNotice(
+    delay === 0
+      ? `${message} / reconnecting`
+      : `${message} / retrying in ${Math.ceil(delay / 1000)}s`,
+  );
+  viewState.streamReconnectTimer = window.setTimeout(() => {
+    viewState.streamReconnectTimer = null;
+    startStream({ resetBackoff: false, message: "Reconnecting to camera" });
+  }, delay);
 }
 
 function pauseStream() {
+  clearStreamReconnect();
+  viewState.streamReconnectAttempt = 0;
   viewState.paused = true;
   elements.pauseButton.textContent = "Resume";
+  elements.streamShell.dataset.state = "paused";
   elements.stream.src = `/snapshot?t=${Date.now()}`;
   showStreamNotice("Live view paused");
 }
@@ -254,7 +330,10 @@ function renderStatus(status) {
   elements.cameraSource.textContent = camera.device;
   setHealthState(status.state);
 
-  elements.feedValue.textContent = feed.ok && feed.online ? "Online" : "Unavailable";
+  const feedOnline = Boolean(feed.ok && feed.online && !feed.stale);
+  const previousFeedOnline = viewState.streamFeedOnline;
+  viewState.streamFeedOnline = feedOnline;
+  elements.feedValue.textContent = feedOnline ? "Online" : feed.stale ? "Stale" : "Unavailable";
   elements.feedDetail.textContent = feed.latency_ms == null ? "No response" : `${feed.latency_ms} ms snapshot`;
 
   if (feed.width && feed.height) {
@@ -300,8 +379,11 @@ function renderStatus(status) {
     elements.warningBanner.hidden = true;
   }
 
-  if (status.state === "offline") {
-    showStreamNotice("Camera feed unavailable");
+  if (!feedOnline && !viewState.paused) {
+    viewState.streamLoaded = false;
+    scheduleStreamReconnect(feed.stale ? "Camera frame is stale" : "Camera feed unavailable");
+  } else if (previousFeedOnline === false && !viewState.paused) {
+    scheduleStreamReconnect("Camera recovered", { immediate: true });
   } else if (viewState.streamLoaded && !viewState.paused) {
     hideStreamNotice();
   }
@@ -479,7 +561,10 @@ async function refreshStatus() {
   } catch (error) {
     setHealthState("offline");
     elements.frameStatus.textContent = error.message;
-    showStreamNotice("Dashboard cannot reach the camera service");
+    viewState.streamFeedOnline = false;
+    if (!viewState.streamLoaded) {
+      scheduleStreamReconnect("Dashboard cannot reach the camera service");
+    }
   }
 }
 
@@ -1215,16 +1300,6 @@ function updateClock() {
   elements.localClock.textContent = new Intl.DateTimeFormat(undefined, { timeStyle: "medium" }).format(now);
 }
 
-elements.stream.addEventListener("load", () => {
-  viewState.streamLoaded = true;
-  if (!viewState.paused) hideStreamNotice();
-});
-
-elements.stream.addEventListener("error", () => {
-  viewState.streamLoaded = false;
-  showStreamNotice("Camera stream interrupted");
-});
-
 elements.maskPreview.addEventListener("load", () => {
   if (elements.maskPreview.naturalWidth && elements.maskPreview.naturalHeight) {
     elements.maskPreviewShell.style.aspectRatio = `${elements.maskPreview.naturalWidth} / ${elements.maskPreview.naturalHeight}`;
@@ -1239,7 +1314,7 @@ elements.maskPreview.addEventListener("error", () => {
 });
 
 elements.pauseButton.addEventListener("click", togglePause);
-elements.reconnectButton.addEventListener("click", startStream);
+elements.reconnectButton.addEventListener("click", () => startStream());
 elements.snapshotButton.addEventListener("click", saveSnapshot);
 elements.fullscreenButton.addEventListener("click", toggleFullscreen);
 elements.cameraRefreshButton.addEventListener("click", () => refreshCameraState("Controls refreshed", true));
@@ -1285,6 +1360,27 @@ elements.captureDialog.addEventListener("click", (event) => {
 });
 document.addEventListener("fullscreenchange", () => {
   elements.fullscreenButton.textContent = document.fullscreenElement ? "Exit fullscreen" : "Fullscreen";
+});
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    viewState.streamHiddenAt = Date.now();
+    return;
+  }
+  const hiddenFor = viewState.streamHiddenAt == null ? 0 : Date.now() - viewState.streamHiddenAt;
+  viewState.streamHiddenAt = null;
+  if (!viewState.paused && (hiddenFor >= streamVisibilityReconnectMs || !viewState.streamLoaded)) {
+    startStream({ message: "Refreshing live view" });
+  }
+});
+window.addEventListener("offline", () => {
+  clearStreamReconnect();
+  viewState.streamFeedOnline = false;
+  viewState.streamLoaded = false;
+  elements.streamShell.dataset.state = "offline";
+  showStreamNotice("Network offline / waiting to reconnect");
+});
+window.addEventListener("online", () => {
+  if (!viewState.paused) scheduleStreamReconnect("Network restored", { immediate: true });
 });
 if ("ResizeObserver" in window) {
   new ResizeObserver(drawMotionMasks).observe(elements.maskPreviewShell);
