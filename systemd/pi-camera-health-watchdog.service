@@ -1,0 +1,21 @@
+[Unit]
+Description=Pi Camera Sentinel system health alert watchdog
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/pi-camera-sentinel.env
+ExecStart=/usr/local/bin/pi-camera-sentinel health-alert-watchdog
+Restart=always
+RestartSec=10
+User=root
+Group=root
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/pi-camera-sentinel
+
+[Install]
+WantedBy=multi-user.target

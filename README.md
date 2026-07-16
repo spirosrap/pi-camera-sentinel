@@ -23,6 +23,7 @@ This project is intentionally small: no cloud camera account, no public port for
 - Automatically reconnects open dashboards after stream, network, or tab-suspension interruptions.
 - Records recent feed outages, restart attempts, and successful recoveries.
 - Can send deduplicated Telegram updates when automatic feed recovery acts.
+- Can send confirmed Telegram warnings and recoveries for Pi power, temperature, and storage.
 - Includes health checks for feed availability, live Pi power throttling, and storage.
 - Reports low storage, CPU temperature, frame freshness, and camera availability.
 - Shows live motion-alert and exposure-watchdog service state with pause and resume controls.
@@ -80,6 +81,12 @@ Enable automatic feed recovery:
 sudo systemctl enable --now pi-camera-recovery-watchdog.service
 ```
 
+Enable system health alerts:
+
+```bash
+sudo systemctl enable --now pi-camera-health-watchdog.service
+```
+
 Open the local dashboard:
 
 ```text
@@ -132,6 +139,7 @@ The `pi-camera-sentinel serve` command provides a small same-origin web app on p
 - motion-alert and exposure-recovery state with pause and resume toggles
 - feed-recovery state, incident history, manual restart action, and pause control
 - active operational Telegram alert state for automatic feed recovery
+- system-health alert state with active-condition count and pause control
 - active Telegram alert-batching window and photo limit
 - secret-safe Home Assistant webhook state and test delivery
 - quiet-hours schedule controls for Telegram notifications
@@ -154,7 +162,7 @@ The status API preserves `system.undervoltage_seen` for compatibility and adds s
 
 Camera writes accept only known V4L2 controls and integer values inside the device-reported range. Browser writes also require a same-origin JSON request. The dashboard deliberately caps manual gain at `128` and exposure at `250` to avoid the extreme settings that can wash a C920 frame completely white.
 
-The dashboard controls the service names in `SENTINEL_MOTION_SERVICE`, `SENTINEL_EXPOSURE_SERVICE`, and `SENTINEL_RECOVERY_SERVICE`. The defaults match the included systemd units; installations with custom unit names can override them in `/etc/pi-camera-sentinel.env`.
+The dashboard controls the service names in `SENTINEL_MOTION_SERVICE`, `SENTINEL_EXPOSURE_SERVICE`, `SENTINEL_RECOVERY_SERVICE`, and `SENTINEL_HEALTH_SERVICE`. The defaults match the included systemd units; installations with custom unit names can override them in `/etc/pi-camera-sentinel.env`.
 
 ## Automatic Feed Recovery
 
@@ -181,6 +189,22 @@ SENTINEL_RECOVERY_TELEGRAM_ALERTS=1
 These alerts use the existing bot and chat configuration. They ignore transient failed checks and manual dashboard restarts, do not replay old history when first enabled, and are not suppressed by motion quiet hours. Telegram delivery failures never block the watchdog and retry on its next cycle.
 
 Run one check manually with `pi-camera-sentinel recovery-step --json`. See [docs/recovery.md](docs/recovery.md).
+
+## System Health Alerts
+
+The health alert watchdog samples active Raspberry Pi power flags, CPU temperature, and archive free space. It waits for three consecutive unhealthy samples before sending a warning and two consecutive healthy samples before sending a recovery:
+
+```text
+SENTINEL_HEALTH_INTERVAL_SECONDS=60
+SENTINEL_HEALTH_FAILURE_THRESHOLD=3
+SENTINEL_HEALTH_RECOVERY_THRESHOLD=2
+SENTINEL_HEALTH_TEMPERATURE_MAX_C=80
+SENTINEL_HEALTH_TELEGRAM_ALERTS=1
+```
+
+The first sample becomes a silent baseline, so enabling the service never reports conditions that were already active. State and pending delivery are persisted atomically. Telegram failures retry without stopping health sampling, and operational health messages are independent of motion quiet hours.
+
+Run one sample manually with `pi-camera-sentinel health-alert-step --json`. See [docs/system-health-alerts.md](docs/system-health-alerts.md).
 
 ## Archive Retention
 

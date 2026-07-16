@@ -80,3 +80,23 @@ def test_feed_recovery_configuration(monkeypatch, tmp_path):
     assert settings.recovery_stale_seconds == 30
     assert settings.recovery_cooldown_seconds == 180
     assert settings.recovery_telegram_alerts is True
+
+
+def test_system_health_alert_configuration(monkeypatch, tmp_path):
+    monkeypatch.setenv("SENTINEL_HEALTH_SERVICE", "custom-health.service")
+    monkeypatch.setenv("SENTINEL_HEALTH_STATE_FILE", str(tmp_path / "health.json"))
+    monkeypatch.setenv("SENTINEL_HEALTH_INTERVAL_SECONDS", "45")
+    monkeypatch.setenv("SENTINEL_HEALTH_FAILURE_THRESHOLD", "4")
+    monkeypatch.setenv("SENTINEL_HEALTH_RECOVERY_THRESHOLD", "3")
+    monkeypatch.setenv("SENTINEL_HEALTH_TEMPERATURE_MAX_C", "78.5")
+    monkeypatch.setenv("SENTINEL_HEALTH_TELEGRAM_ALERTS", "1")
+
+    settings = Settings.from_env()
+
+    assert settings.health_service == "custom-health.service"
+    assert settings.health_state_file == tmp_path / "health.json"
+    assert settings.health_interval_seconds == 45
+    assert settings.health_failure_threshold == 4
+    assert settings.health_recovery_threshold == 3
+    assert settings.health_temperature_max_c == 78.5
+    assert settings.health_telegram_alerts is True

@@ -6,8 +6,8 @@
     <meta name="theme-color" content="#171a18">
     <meta name="color-scheme" content="light">
     <title>Pi Camera Sentinel</title>
-    <link rel="stylesheet" href="/assets/styles.css?v=1.5.0">
-    <script src="/assets/app.js?v=1.5.0" defer></script>
+    <link rel="stylesheet" href="/assets/styles.css?v=1.6.0">
+    <script src="/assets/app.js?v=1.6.0" defer></script>
   </head>
   <body>
     <header class="topbar">
@@ -17,7 +17,7 @@
           <span class="brand-kicker">Private camera</span>
           <span class="brand-name-row">
             <strong id="app-title">Pi Camera Sentinel</strong>
-            <span class="app-version" id="app-version">v1.5.0</span>
+            <span class="app-version" id="app-version">v1.6.0</span>
           </span>
         </span>
       </a>
@@ -159,6 +159,24 @@
             </div>
             <ol id="recovery-history-list" aria-live="polite"></ol>
           </div>
+
+          <article class="service-row" id="health-service-row" data-state="loading">
+            <div class="service-copy">
+              <span class="service-signal" aria-hidden="true"></span>
+              <div>
+                <h3>System health alerts</h3>
+                <p id="health-service-detail">Reading health alert state</p>
+              </div>
+            </div>
+            <div class="service-action">
+              <strong id="health-service-state">Checking</strong>
+              <label class="toggle-control service-toggle" title="Pause or resume system health alerts">
+                <input type="checkbox" id="health-service-toggle" disabled>
+                <span class="toggle-track" aria-hidden="true"></span>
+                <span class="visually-hidden">System health alerts enabled</span>
+              </label>
+            </div>
+          </article>
 
           <article class="service-row" id="watchdog-service-row" data-state="loading">
             <div class="service-copy">

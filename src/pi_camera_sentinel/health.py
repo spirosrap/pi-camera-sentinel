@@ -183,6 +183,18 @@ def read_power_status() -> PowerStatus:
     return power_status_from_flags(read_throttle_flags(), recent_undervoltage_seen())
 
 
+def read_current_power_status() -> PowerStatus:
+    return power_status_from_flags(read_throttle_flags(), None)
+
+
+def read_cpu_temperature() -> float | None:
+    try:
+        value = Path("/sys/class/thermal/thermal_zone0/temp").read_text(encoding="ascii").strip()
+        return round(float(value) / 1000.0, 1)
+    except (OSError, ValueError):
+        return None
+
+
 def existing_disk_path(path: Path) -> Path:
     candidate = path.expanduser()
     while not candidate.exists() and candidate != candidate.parent:

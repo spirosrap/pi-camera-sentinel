@@ -85,6 +85,7 @@ class Settings:
     motion_service: str
     exposure_service: str
     recovery_service: str
+    health_service: str
     stream_service: str
     recovery_state_file: Path
     recovery_interval_seconds: float
@@ -92,6 +93,12 @@ class Settings:
     recovery_stale_seconds: float
     recovery_cooldown_seconds: float
     recovery_telegram_alerts: bool
+    health_state_file: Path
+    health_interval_seconds: float
+    health_failure_threshold: int
+    health_recovery_threshold: int
+    health_temperature_max_c: float
+    health_telegram_alerts: bool
     policy_file: Path
     mask_file: Path
     timezone: str
@@ -165,6 +172,10 @@ class Settings:
                 "SENTINEL_RECOVERY_SERVICE",
                 "pi-camera-recovery-watchdog.service",
             ),
+            health_service=env_str(
+                "SENTINEL_HEALTH_SERVICE",
+                "pi-camera-health-watchdog.service",
+            ),
             stream_service=env_str("SENTINEL_STREAM_SERVICE", "pi-camera-stream.service"),
             recovery_state_file=Path(
                 env_str(
@@ -177,6 +188,17 @@ class Settings:
             recovery_stale_seconds=env_float("SENTINEL_RECOVERY_STALE_SECONDS", 20.0),
             recovery_cooldown_seconds=env_float("SENTINEL_RECOVERY_COOLDOWN_SECONDS", 120.0),
             recovery_telegram_alerts=env_bool("SENTINEL_RECOVERY_TELEGRAM_ALERTS", False),
+            health_state_file=Path(
+                env_str(
+                    "SENTINEL_HEALTH_STATE_FILE",
+                    "/var/lib/pi-camera-sentinel/health-alert-state.json",
+                )
+            ),
+            health_interval_seconds=env_float("SENTINEL_HEALTH_INTERVAL_SECONDS", 60.0),
+            health_failure_threshold=env_int("SENTINEL_HEALTH_FAILURE_THRESHOLD", 3),
+            health_recovery_threshold=env_int("SENTINEL_HEALTH_RECOVERY_THRESHOLD", 2),
+            health_temperature_max_c=env_float("SENTINEL_HEALTH_TEMPERATURE_MAX_C", 80.0),
+            health_telegram_alerts=env_bool("SENTINEL_HEALTH_TELEGRAM_ALERTS", False),
             policy_file=policy_file,
             mask_file=mask_file,
             timezone=env_str("SENTINEL_TIMEZONE", "local", "MOTION_TIMEZONE"),

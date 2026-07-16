@@ -23,7 +23,8 @@ from PIL import Image, ImageStat
 from . import __version__
 from .camera import apply_profile, camera_state, set_controls
 from .config import Settings
-from .health import PowerStatus, disk_status, read_power_status
+from .health import PowerStatus, disk_status, read_cpu_temperature, read_power_status
+from .health_alerts import HealthAlertState, load_health_alert_state
 from .masks import MAX_MOTION_MASKS, load_motion_masks, save_motion_masks, validate_motion_masks
 from .policy import AlertPolicy, load_alert_policy, save_alert_policy
 from .recovery import RecoveryState, load_recovery_state, manual_restart_feed
@@ -54,14 +55,6 @@ def read_system_uptime() -> float | None:
         value = Path("/proc/uptime").read_text(encoding="ascii").split()[0]
         return round(float(value), 1)
     except (OSError, ValueError, IndexError):
-        return None
-
-
-def read_cpu_temperature() -> float | None:
-    try:
-        value = Path("/sys/class/thermal/thermal_zone0/temp").read_text(encoding="ascii").strip()
-        return round(float(value) / 1000.0, 1)
-    except (OSError, ValueError):
         return None
 
 
@@ -168,6 +161,12 @@ def collect_dashboard_status(
         )
         warnings.append("feed recovery state is unreadable")
 
+    try:
+        health_alert_state = load_health_alert_state(settings.health_state_file)
+    except (OSError, ValueError):
+        health_alert_state = HealthAlertState()
+        warnings.append("system health alert state is unreadable")
+
     feed_ok = bool(feed["ok"] and feed["online"] and not feed["stale"])
     if not feed_ok or not camera_exists:
         state = "offline"
@@ -203,6 +202,17 @@ def collect_dashboard_status(
                     and not settings.missing_telegram_fields()
                 ),
                 "state": recovery_state.to_dict(),
+            },
+            "health_alerts": {
+                "interval_seconds": settings.health_interval_seconds,
+                "failure_threshold": settings.health_failure_threshold,
+                "recovery_threshold": settings.health_recovery_threshold,
+                "temperature_max_c": settings.health_temperature_max_c,
+                "telegram_alerts": (
+                    settings.health_telegram_alerts
+                    and not settings.missing_telegram_fields()
+                ),
+                "state": health_alert_state.to_dict(),
             },
         },
         "system": {
@@ -464,6 +474,7 @@ class DashboardApplication:
             return {
                 "motion": service_state(self.settings.motion_service),
                 "recovery": service_state(self.settings.recovery_service),
+                "health": service_state(self.settings.health_service),
                 "watchdog": service_state(self.settings.exposure_service),
             }
 
@@ -471,6 +482,7 @@ class DashboardApplication:
         service_names = {
             "motion": self.settings.motion_service,
             "recovery": self.settings.recovery_service,
+            "health": self.settings.health_service,
             "watchdog": self.settings.exposure_service,
         }
         try:

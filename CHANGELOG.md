@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.6.0 - 2026-07-16
+
+- Add an optional system health watchdog for Pi power, CPU temperature, and archive storage.
+- Require repeated unhealthy and healthy samples before declaring a transition.
+- Baseline existing conditions silently on first startup to prevent migration alerts.
+- Persist per-condition counters and queued Telegram delivery across service restarts.
+- Retry failed delivery without losing subsequent health observations.
+- Add a hardened systemd service with installer support and dashboard pause control.
+- Show active conditions, pending delivery, and configured Telegram state in Monitoring.
+
 ## 1.5.0 - 2026-07-16
 
 - Add optional Telegram alerts for automatic feed restart attempts and recoveries.

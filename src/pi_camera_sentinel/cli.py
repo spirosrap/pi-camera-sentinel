@@ -17,6 +17,15 @@ from .config import Settings
 from .dashboard import serve_dashboard
 from .exposure import exposure_watchdog_step
 from .health import check_health
+from .health_alerts import (
+    HealthAlertState,
+    collect_health_issues,
+    health_watchdog_step,
+    load_health_alert_state,
+    process_health_alerts,
+    save_health_alert_state,
+    validate_health_alert_config,
+)
 from .masks import MotionMask, load_motion_masks
 from .motion import changed_pixel_ratio, fetch_snapshot, normalize_image, summarize_ratios
 from .policy import load_alert_policy
@@ -391,6 +400,75 @@ def cmd_health(settings: Settings, _args: argparse.Namespace) -> int:
     return 0 if result.ok else 1
 
 
+def health_alert_state_or_default(settings: Settings) -> HealthAlertState:
+    try:
+        return load_health_alert_state(settings.health_state_file)
+    except (OSError, ValueError) as exc:
+        LOG.warning("health alert state is unreadable; starting fresh: %s", exc)
+        return HealthAlertState()
+
+
+def health_alert_step_with_delivery(settings: Settings) -> HealthAlertState:
+    state = health_alert_state_or_default(settings)
+    result = health_watchdog_step(settings, state, collect_health_issues(settings))
+    save_health_alert_state(settings.health_state_file, result)
+    try:
+        return process_health_alerts(settings, result)
+    except Exception as exc:
+        LOG.warning("system health Telegram alert failed; delivery will retry: %s", exc)
+        return result
+
+
+def cmd_health_alert_step(settings: Settings, args: argparse.Namespace) -> int:
+    try:
+        validate_health_alert_config(settings)
+    except ValueError as exc:
+        LOG.error("invalid system health alert configuration: %s", exc)
+        return 2
+    result = health_alert_step_with_delivery(settings)
+    if args.json:
+        print(json.dumps(result.to_dict(), sort_keys=True))
+    return 0
+
+
+def cmd_health_alert_watchdog(settings: Settings, _args: argparse.Namespace) -> int:
+    try:
+        validate_health_alert_config(settings)
+    except ValueError as exc:
+        LOG.error("invalid system health alert configuration: %s", exc)
+        return 2
+    missing_telegram = settings.missing_telegram_fields()
+    telegram_alerts = settings.health_telegram_alerts and not missing_telegram
+    if settings.health_telegram_alerts and missing_telegram:
+        LOG.warning(
+            "system health Telegram alerts disabled; missing: %s",
+            ", ".join(missing_telegram),
+        )
+    LOG.info(
+        "starting system health alerts interval=%ss failures=%s recoveries=%s temperature=%sC telegram_alerts=%s",
+        settings.health_interval_seconds,
+        settings.health_failure_threshold,
+        settings.health_recovery_threshold,
+        settings.health_temperature_max_c,
+        "on" if telegram_alerts else "off",
+    )
+    while True:
+        try:
+            state = health_alert_step_with_delivery(settings)
+            active = sum(1 for tracker in state.trackers if tracker.active)
+            LOG.info(
+                "system health alert status active=%s pending=%s",
+                active,
+                len(state.pending_alerts),
+            )
+        except KeyboardInterrupt:
+            LOG.info("stopping")
+            return 0
+        except Exception:
+            LOG.exception("system health alert cycle failed")
+        time.sleep(settings.health_interval_seconds)
+
+
 def cmd_retention_cleanup(settings: Settings, args: argparse.Namespace) -> int:
     try:
         result = enforce_retention(
@@ -559,6 +637,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers.add_parser("show-chat-ids", help="print chat IDs from recent bot updates").set_defaults(func=cmd_show_chat_ids)
     subparsers.add_parser("healthcheck", help="check snapshot, camera, power, and storage status").set_defaults(func=cmd_health)
+    health_alert_once = subparsers.add_parser(
+        "health-alert-step",
+        help="sample Pi power, temperature, and storage alert state once",
+    )
+    health_alert_once.add_argument("--json", action="store_true", help="print health alert state as JSON")
+    health_alert_once.set_defaults(func=cmd_health_alert_step)
+    subparsers.add_parser(
+        "health-alert-watchdog",
+        help="continuously send confirmed Pi system health transitions",
+    ).set_defaults(func=cmd_health_alert_watchdog)
     retention = subparsers.add_parser(
         "retention-cleanup",
         help="apply local motion archive retention limits",

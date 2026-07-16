@@ -105,6 +105,7 @@ const viewState = {
   policyState: null,
   recoveryBusy: false,
   recoveryState: null,
+  healthAlertState: null,
   serviceBusy: new Set(),
   serviceStates: {},
   streamFeedOnline: null,
@@ -128,6 +129,12 @@ const serviceElements = {
     row: document.querySelector("#recovery-service-row"),
     state: document.querySelector("#recovery-service-state"),
     toggle: document.querySelector("#recovery-service-toggle"),
+  },
+  health: {
+    detail: document.querySelector("#health-service-detail"),
+    row: document.querySelector("#health-service-row"),
+    state: document.querySelector("#health-service-state"),
+    toggle: document.querySelector("#health-service-toggle"),
   },
   watchdog: {
     detail: document.querySelector("#watchdog-service-detail"),
@@ -359,6 +366,7 @@ function renderStatus(status) {
 
   renderAlertBatching(automation?.alert_batching || { enabled: false });
   renderFeedRecovery(automation?.feed_recovery || null);
+  renderHealthAlerts(automation?.health_alerts || null);
 
   if (!viewState.webhookBusy) {
     renderWebhookIntegration(integrations?.home_assistant || { configured: false });
@@ -457,6 +465,27 @@ function renderFeedRecovery(recovery) {
   renderRecoveryHistory(recovery?.state?.events || []);
   if (viewState.serviceStates.recovery) {
     renderService("recovery", viewState.serviceStates.recovery);
+  }
+}
+
+function healthAlertDetail(healthAlerts) {
+  if (!healthAlerts?.state?.initialized) return "Waiting for first health sample";
+  const trackers = Array.isArray(healthAlerts.state.trackers) ? healthAlerts.state.trackers : [];
+  const active = trackers.filter((tracker) => tracker.active);
+  const activeLabel = active.length
+    ? `${active.length} active ${active.length === 1 ? "condition" : "conditions"}`
+    : "All clear";
+  const pending = Array.isArray(healthAlerts.state.pending_alerts)
+    ? healthAlerts.state.pending_alerts.length
+    : 0;
+  const delivery = healthAlerts.telegram_alerts ? "Telegram alerts" : "local monitoring";
+  return pending ? `${activeLabel} / ${pending} pending / ${delivery}` : `${activeLabel} / ${delivery}`;
+}
+
+function renderHealthAlerts(healthAlerts) {
+  viewState.healthAlertState = healthAlerts;
+  if (viewState.serviceStates.health) {
+    renderService("health", viewState.serviceStates.health);
   }
 }
 
@@ -583,6 +612,8 @@ function renderService(serviceId, state) {
   target.state.textContent = labels[state.state] || "Unknown";
   if (serviceId === "recovery" && state.available && state.active) {
     target.detail.textContent = recoveryDetail(viewState.recoveryState);
+  } else if (serviceId === "health" && state.available && state.active) {
+    target.detail.textContent = healthAlertDetail(viewState.healthAlertState);
   } else {
     target.detail.textContent = state.available
       ? `${state.name} / ${state.sub_state}`

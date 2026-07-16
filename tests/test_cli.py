@@ -12,6 +12,7 @@ from pi_camera_sentinel.batching import MotionBatch, MotionSample
 from pi_camera_sentinel.config import Settings
 from pi_camera_sentinel.policy import AlertPolicy, save_alert_policy
 from pi_camera_sentinel.recovery import RecoveryState
+from pi_camera_sentinel.health_alerts import HealthAlertState
 
 
 def motion_settings(tmp_path) -> Settings:
@@ -173,6 +174,28 @@ def test_recovery_alert_failure_does_not_block_watchdog_state(monkeypatch, tmp_p
     )
 
     result = cli.recovery_step_with_alerts(settings)
+
+    assert result is state
+    assert "delivery will retry" in caplog.text
+
+
+def test_health_alert_failure_does_not_block_watchdog_state(monkeypatch, tmp_path, caplog):
+    settings = replace(
+        motion_settings(tmp_path),
+        health_state_file=tmp_path / "health-state.json",
+    )
+    state = HealthAlertState(initialized=True)
+    monkeypatch.setattr(cli, "health_alert_state_or_default", lambda _settings: state)
+    monkeypatch.setattr(cli, "collect_health_issues", lambda _settings: ())
+    monkeypatch.setattr(cli, "health_watchdog_step", lambda *_args: state)
+    monkeypatch.setattr(cli, "save_health_alert_state", lambda *_args: None)
+    monkeypatch.setattr(
+        cli,
+        "process_health_alerts",
+        lambda *_args: (_ for _ in ()).throw(RuntimeError("Telegram offline")),
+    )
+
+    result = cli.health_alert_step_with_delivery(settings)
 
     assert result is state
     assert "delivery will retry" in caplog.text

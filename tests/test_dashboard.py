@@ -16,9 +16,15 @@ from pi_camera_sentinel.dashboard import (
     same_origin,
     with_query,
 )
+from pi_camera_sentinel.health import power_status_from_flags
+from pi_camera_sentinel.health_alerts import (
+    HealthAlertState,
+    HealthIssue,
+    HealthIssueTracker,
+    save_health_alert_state,
+)
 from pi_camera_sentinel.recovery import RecoveryEvent, RecoveryState
 from pi_camera_sentinel.retention import RetentionPolicy
-from pi_camera_sentinel.health import power_status_from_flags
 
 
 class FakeResponse:
@@ -46,6 +52,7 @@ def dashboard_settings(tmp_path) -> Settings:
         disk_min_free_mb=0,
         dashboard_title="Garden camera",
         recovery_state_file=tmp_path / "recovery-state.json",
+        health_state_file=tmp_path / "health-alert-state.json",
     )
 
 
@@ -86,6 +93,8 @@ def test_collect_dashboard_status_for_online_feed(tmp_path):
     assert result["automation"]["feed_recovery"]["state"]["status"] == "unknown"
     assert result["automation"]["feed_recovery"]["failure_threshold"] == 3
     assert result["automation"]["feed_recovery"]["telegram_alerts"] is False
+    assert result["automation"]["health_alerts"]["telegram_alerts"] is False
+    assert result["automation"]["health_alerts"]["state"]["initialized"] is False
     assert result["integrations"]["home_assistant"]["configured"] is False
 
 
@@ -123,6 +132,40 @@ def test_dashboard_status_reports_configured_recovery_telegram_alerts(tmp_path):
     )
 
     assert result["automation"]["feed_recovery"]["telegram_alerts"] is True
+
+
+def test_dashboard_status_reports_active_system_health_alerts(tmp_path):
+    settings = replace(
+        dashboard_settings(tmp_path),
+        health_telegram_alerts=True,
+        telegram_token="token",
+        telegram_chat_id="123",
+    )
+    save_health_alert_state(
+        settings.health_state_file,
+        HealthAlertState(
+            initialized=True,
+            trackers=(
+                HealthIssueTracker(
+                    issue=HealthIssue("power", "Power", "Undervoltage"),
+                    active=True,
+                ),
+            ),
+        ),
+    )
+
+    result = collect_dashboard_status(
+        settings,
+        power_status=power_status(),
+        snapshot_get=lambda *_args, **_kwargs: FakeResponse(
+            jpeg_bytes(),
+            {"content-type": "image/jpeg"},
+        ),
+    )
+
+    health_alerts = result["automation"]["health_alerts"]
+    assert health_alerts["telegram_alerts"] is True
+    assert health_alerts["state"]["trackers"][0]["issue"]["key"] == "power"
 
 
 def test_collect_dashboard_status_does_not_degrade_for_historical_power_flag(tmp_path):
@@ -338,6 +381,7 @@ def test_dashboard_services_include_feed_recovery(monkeypatch, tmp_path):
         dashboard_settings(tmp_path),
         motion_service="motion.service",
         recovery_service="recovery.service",
+        health_service="health.service",
         exposure_service="exposure.service",
     )
     observed = []
@@ -348,8 +392,13 @@ def test_dashboard_services_include_feed_recovery(monkeypatch, tmp_path):
 
     services = DashboardApplication(settings).services()
 
-    assert list(services) == ["motion", "recovery", "watchdog"]
-    assert observed == ["motion.service", "recovery.service", "exposure.service"]
+    assert list(services) == ["motion", "recovery", "health", "watchdog"]
+    assert observed == [
+        "motion.service",
+        "recovery.service",
+        "health.service",
+        "exposure.service",
+    ]
 
 
 def test_dashboard_manual_restart_returns_persisted_recovery_state(monkeypatch, tmp_path):

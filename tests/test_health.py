@@ -8,6 +8,7 @@ from pi_camera_sentinel.health import (
     check_health,
     parse_throttled_output,
     power_status_from_flags,
+    read_current_power_status,
     read_throttle_flags,
 )
 
@@ -82,3 +83,20 @@ def test_healthcheck_reports_disk_space(monkeypatch, tmp_path):
     assert result.disk_low is False
     assert result.power.state == "stable"
     assert result.undervoltage_seen is False
+
+
+def test_current_power_status_does_not_read_kernel_history(monkeypatch):
+    monkeypatch.setattr(
+        "pi_camera_sentinel.health.read_throttle_flags",
+        lambda: (0x5, "0x5"),
+    )
+    monkeypatch.setattr(
+        "pi_camera_sentinel.health.recent_undervoltage_seen",
+        lambda: pytest.fail("current-only power status should not read logs"),
+    )
+
+    status = read_current_power_status()
+
+    assert status.state == "active"
+    assert status.current_issues == ("Undervoltage", "CPU throttled")
+    assert status.recent_log_undervoltage is None

@@ -75,6 +75,12 @@ Set `SENTINEL_RECOVERY_TELEGRAM_ALERTS=1` to receive text updates when automatic
 
 Recovery delivery is deduplicated through the persisted recovery state. Existing incidents are not replayed when the option is first enabled, and a Telegram failure is retried without interrupting the camera watchdog.
 
+## System Health Updates
+
+Set `SENTINEL_HEALTH_TELEGRAM_ALERTS=1` and enable `pi-camera-health-watchdog.service` to receive confirmed warnings and recoveries for active Pi power limits, high CPU temperature, and low archive storage. The watchdog requires repeated observations, silently baselines conditions present at first startup, and persists pending delivery across restarts.
+
+Health and feed-recovery messages are operational and are not suppressed by motion quiet hours.
+
 Set the schedule timezone in `/etc/pi-camera-sentinel.env`:
 
 ```text
