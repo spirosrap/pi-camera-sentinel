@@ -19,6 +19,7 @@
 - exposure watchdog for black/washed-out frames
 - automatic feed recovery with restart thresholds and cooldown protection
 - confirmed system-health Telegram warnings with persistent retry state
+- range-aware motion activity insights from retained captures
 - systemd installer
 
 ## Non-Goals For Now

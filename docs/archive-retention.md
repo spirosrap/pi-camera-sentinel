@@ -40,3 +40,5 @@ sudo sh -c 'set -a; . /etc/pi-camera-sentinel.env; set +a; pi-camera-sentinel re
 ```
 
 The dashboard event-history header shows current usage, configured limits, and whether cleanup is pending. The same structured state is available under `summary.retention` from `/api/events`.
+
+The activity chart uses these same retained files. When cleanup removes a capture, the corresponding range total and time bucket update on the next event refresh. No separate analytics database or stale aggregate is maintained. See [activity-insights.md](activity-insights.md).

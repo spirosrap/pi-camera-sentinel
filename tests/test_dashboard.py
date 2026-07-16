@@ -259,6 +259,12 @@ def test_event_history_filters_summarizes_and_paginates(tmp_path):
         "last_captured_at": "1970-01-24T03:32:20+00:00",
     }
     assert first_page["next_before"] == timestamps[0]
+    activity = first_page["activity"]
+    assert len(activity["buckets"]) == 24
+    assert sum(bucket["count"] for bucket in activity["buckets"]) == 2
+    assert activity["peak_count"] == 2
+    assert activity["active_bucket_count"] == 1
+    assert activity["last_captured_at"] == "1970-01-24T03:32:20+00:00"
 
     second_page = event_history(
         tmp_path,
@@ -271,6 +277,42 @@ def test_event_history_filters_summarizes_and_paginates(tmp_path):
     assert second_page["next_before"] is None
     assert event_history(tmp_path, window="7d", now=now)["summary"]["window_count"] == 3
     assert event_history(tmp_path, window="all", now=now)["summary"]["window_count"] == 4
+
+
+def test_event_activity_places_boundaries_and_adapts_all_range(tmp_path):
+    now = 10_000_000.0
+    timestamps = [
+        now - (30 * 60),
+        now - (90 * 60),
+        now - (24 * 60 * 60),
+        now - (45 * 24 * 60 * 60),
+    ]
+    for index, timestamp in enumerate(timestamps):
+        path = tmp_path / f"motion-activity-{index}.jpg"
+        path.write_bytes(b"x" * (index + 1))
+        os.utime(path, (timestamp, timestamp))
+
+    daily = event_history(tmp_path, window="24h", now=now)["activity"]
+    assert len(daily["buckets"]) == 24
+    assert sum(bucket["count"] for bucket in daily["buckets"]) == 3
+    assert daily["active_bucket_count"] == 3
+    assert daily["peak_count"] == 1
+    assert daily["peak_started_at"] == daily["buckets"][-1]["started_at"]
+
+    complete = event_history(tmp_path, window="all", now=now)["activity"]
+    assert complete["bucket_seconds"] == 4 * 24 * 60 * 60
+    assert len(complete["buckets"]) == 12
+    assert sum(bucket["count"] for bucket in complete["buckets"]) == 4
+
+
+def test_empty_event_activity_uses_stable_single_all_bucket(tmp_path):
+    activity = event_history(tmp_path, window="all", now=10_000_000.0)["activity"]
+
+    assert activity["active_bucket_count"] == 0
+    assert activity["peak_count"] == 0
+    assert activity["peak_started_at"] is None
+    assert activity["last_captured_at"] is None
+    assert len(activity["buckets"]) == 1
 
 
 def test_event_history_reports_archive_retention_state(tmp_path):

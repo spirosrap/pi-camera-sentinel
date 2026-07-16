@@ -48,6 +48,7 @@ EVENT_WINDOWS = {
     "all": None,
 }
 MAX_EVENT_PAGE_SIZE = 48
+MAX_ACTIVITY_BUCKETS = 14
 
 
 def read_system_uptime() -> float | None:
@@ -251,6 +252,79 @@ def motion_event_records(directory: Path) -> list[tuple[Path, float, int]]:
     return sorted(records, key=lambda record: (record[1], record[0].name), reverse=True)
 
 
+def event_activity(
+    records: list[tuple[Path, float, int]],
+    *,
+    window: str,
+    now: float,
+) -> dict[str, object]:
+    if window == "24h":
+        bucket_count = 24
+        bucket_seconds = 60 * 60
+    elif window == "7d":
+        bucket_count = 7
+        bucket_seconds = 24 * 60 * 60
+    elif window == "all":
+        if records:
+            span_seconds = max(1.0, now - records[-1][1])
+            days_per_bucket = max(
+                1,
+                math.ceil(span_seconds / (MAX_ACTIVITY_BUCKETS * 24 * 60 * 60)),
+            )
+            bucket_seconds = days_per_bucket * 24 * 60 * 60
+            bucket_count = min(
+                MAX_ACTIVITY_BUCKETS,
+                max(1, math.ceil(span_seconds / bucket_seconds)),
+            )
+        else:
+            bucket_count = 1
+            bucket_seconds = 24 * 60 * 60
+    else:
+        raise ValueError("window must be one of: 24h, 7d, all")
+
+    started_at = now - (bucket_count * bucket_seconds)
+    buckets = [
+        {
+            "started_at": dt.datetime.fromtimestamp(
+                started_at + (index * bucket_seconds),
+                dt.timezone.utc,
+            ).isoformat(),
+            "ended_at": dt.datetime.fromtimestamp(
+                started_at + ((index + 1) * bucket_seconds),
+                dt.timezone.utc,
+            ).isoformat(),
+            "count": 0,
+            "size_bytes": 0,
+        }
+        for index in range(bucket_count)
+    ]
+    for _path, timestamp, size in records:
+        index = math.floor((timestamp - started_at) / bucket_seconds)
+        index = min(max(index, 0), bucket_count - 1)
+        buckets[index]["count"] += 1
+        buckets[index]["size_bytes"] += size
+
+    peak_count = max((bucket["count"] for bucket in buckets), default=0)
+    peak_index = max(
+        (index for index, bucket in enumerate(buckets) if bucket["count"] == peak_count),
+        default=0,
+    )
+    return {
+        "starts_at": dt.datetime.fromtimestamp(started_at, dt.timezone.utc).isoformat(),
+        "ends_at": dt.datetime.fromtimestamp(now, dt.timezone.utc).isoformat(),
+        "bucket_seconds": bucket_seconds,
+        "active_bucket_count": sum(1 for bucket in buckets if bucket["count"] > 0),
+        "peak_count": peak_count,
+        "peak_started_at": buckets[peak_index]["started_at"] if peak_count else None,
+        "last_captured_at": (
+            dt.datetime.fromtimestamp(records[0][1], dt.timezone.utc).isoformat()
+            if records
+            else None
+        ),
+        "buckets": buckets,
+    }
+
+
 def event_history(
     directory: Path,
     *,
@@ -307,6 +381,7 @@ def event_history(
         "events": events,
         "window": window,
         "summary": summary,
+        "activity": event_activity(window_records, window=window, now=current_time),
         "next_before": page[-1][1] if has_more and page else None,
     }
 

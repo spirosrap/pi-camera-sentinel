@@ -6,8 +6,8 @@
     <meta name="theme-color" content="#171a18">
     <meta name="color-scheme" content="light">
     <title>Pi Camera Sentinel</title>
-    <link rel="stylesheet" href="/assets/styles.css?v=1.6.0">
-    <script src="/assets/app.js?v=1.6.0" defer></script>
+    <link rel="stylesheet" href="/assets/styles.css?v=1.7.0">
+    <script src="/assets/app.js?v=1.7.0" defer></script>
   </head>
   <body>
     <header class="topbar">
@@ -17,7 +17,7 @@
           <span class="brand-kicker">Private camera</span>
           <span class="brand-name-row">
             <strong id="app-title">Pi Camera Sentinel</strong>
-            <span class="app-version" id="app-version">v1.6.0</span>
+            <span class="app-version" id="app-version">v1.7.0</span>
           </span>
         </span>
       </a>
@@ -357,6 +357,40 @@
             </div>
             <p class="section-meta" id="events-meta" role="status" aria-live="polite">Checking for saved events</p>
             <p class="retention-meta" id="retention-meta">Reading archive policy</p>
+          </div>
+        </div>
+        <div class="activity-band" id="activity-band" data-state="loading">
+          <div class="activity-summary">
+            <div class="activity-heading">
+              <h3>Activity</h3>
+              <p id="activity-range">Rolling 24 hours</p>
+            </div>
+            <div class="activity-stats">
+              <div>
+                <span>Captures</span>
+                <strong id="activity-total">--</strong>
+              </div>
+              <div>
+                <span>Active periods</span>
+                <strong id="activity-active">--</strong>
+              </div>
+              <div>
+                <span>Peak period</span>
+                <strong id="activity-peak">--</strong>
+              </div>
+              <div>
+                <span>Last activity</span>
+                <strong id="activity-last">--</strong>
+              </div>
+            </div>
+          </div>
+          <div class="activity-visual">
+            <div class="activity-chart" id="activity-chart" role="img" aria-label="Loading motion activity"></div>
+            <div class="activity-axis" aria-hidden="true">
+              <span id="activity-axis-start">--</span>
+              <span id="activity-axis-middle">--</span>
+              <span id="activity-axis-end">Now</span>
+            </div>
           </div>
         </div>
         <div class="event-grid" id="event-grid"></div>

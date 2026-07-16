@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.7.0 - 2026-07-16
+
+- Add motion activity insights for the 24-hour, 7-day, and all-time archive ranges.
+- Return deterministic count and size buckets from the existing event API scan.
+- Use hourly, daily, or adaptive whole-day intervals without adding a database.
+- Show capture total, active periods, peak period, and last activity above event history.
+- Render a compact dependency-free activity chart with local-time labels and accessible summaries.
+- Keep bucket totals reconciled with the selected range and retained archive policy.
+- Preserve pagination behavior and avoid additional image or archive requests.
+
 ## 1.6.0 - 2026-07-16
 
 - Add an optional system health watchdog for Pi power, CPU temperature, and archive storage.

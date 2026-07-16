@@ -1,6 +1,16 @@
 "use strict";
 
 const elements = {
+  activityActive: document.querySelector("#activity-active"),
+  activityAxisEnd: document.querySelector("#activity-axis-end"),
+  activityAxisMiddle: document.querySelector("#activity-axis-middle"),
+  activityAxisStart: document.querySelector("#activity-axis-start"),
+  activityBand: document.querySelector("#activity-band"),
+  activityChart: document.querySelector("#activity-chart"),
+  activityLast: document.querySelector("#activity-last"),
+  activityPeak: document.querySelector("#activity-peak"),
+  activityRange: document.querySelector("#activity-range"),
+  activityTotal: document.querySelector("#activity-total"),
   alertBatchDetail: document.querySelector("#alert-batch-detail"),
   alertBatchRow: document.querySelector("#alert-batch-row"),
   alertBatchState: document.querySelector("#alert-batch-state"),
@@ -87,6 +97,7 @@ const viewState = {
   cameraState: null,
   dirtyControls: new Set(),
   eventCursor: null,
+  eventActivity: null,
   eventSummary: null,
   eventWindow: "24h",
   events: [],
@@ -155,6 +166,9 @@ const dateTime = new Intl.DateTimeFormat(undefined, {
 });
 
 const relativeTime = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+const activityTime = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
+const activityDay = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
+const activityWeekday = new Intl.DateTimeFormat(undefined, { weekday: "short" });
 const minimumDrawnMaskSize = 0.02;
 const streamReconnectBaseMs = 1000;
 const streamReconnectMaxMs = 30000;
@@ -1279,11 +1293,80 @@ function renderEventSummary() {
   elements.retentionMeta.textContent = `Archive: ${current} / policy ${policy}${pending}`;
 }
 
+function activityTick(isoDate) {
+  if (!isoDate) return "--";
+  const date = new Date(isoDate);
+  if (viewState.eventWindow === "24h") return activityTime.format(date);
+  if (viewState.eventWindow === "7d") return activityWeekday.format(date);
+  return activityDay.format(date);
+}
+
+function renderEventActivity() {
+  const activity = viewState.eventActivity;
+  if (!activity || !Array.isArray(activity.buckets)) {
+    elements.activityBand.dataset.state = "unavailable";
+    elements.activityRange.textContent = "Activity unavailable";
+    elements.activityTotal.textContent = "--";
+    elements.activityActive.textContent = "--";
+    elements.activityPeak.textContent = "--";
+    elements.activityLast.textContent = "--";
+    elements.activityChart.replaceChildren();
+    elements.activityChart.setAttribute("aria-label", "Motion activity unavailable");
+    elements.activityAxisStart.textContent = "--";
+    elements.activityAxisMiddle.textContent = "--";
+    elements.activityAxisEnd.textContent = "Now";
+    return;
+  }
+
+  const buckets = activity.buckets;
+  const total = buckets.reduce((sum, bucket) => sum + Number(bucket.count || 0), 0);
+  const peak = Number(activity.peak_count || 0);
+  const rangeLabels = {
+    "24h": "Rolling 24 hours",
+    "7d": "Rolling 7 days",
+    all: "All retained captures",
+  };
+  elements.activityBand.dataset.state = total > 0 ? "active" : "empty";
+  elements.activityRange.textContent = rangeLabels[viewState.eventWindow] || "Selected range";
+  elements.activityTotal.textContent = String(total);
+  elements.activityActive.textContent = `${activity.active_bucket_count} / ${buckets.length}`;
+  elements.activityPeak.textContent = peak && activity.peak_started_at
+    ? `${peak} at ${activityTick(activity.peak_started_at)}`
+    : "No activity";
+  elements.activityLast.textContent = activity.last_captured_at
+    ? formatRelative(activity.last_captured_at)
+    : "None in range";
+
+  const bars = buckets.map((bucket) => {
+    const count = Number(bucket.count || 0);
+    const level = peak > 0 && count > 0 ? Math.max(1, Math.ceil((count / peak) * 10)) : 0;
+    const bar = document.createElement("span");
+    bar.className = "activity-bar";
+    bar.dataset.level = String(level);
+    bar.dataset.peak = String(peak > 0 && count === peak);
+    bar.title = `${count} ${count === 1 ? "capture" : "captures"} / ${dateTime.format(new Date(bucket.started_at))}`;
+    bar.setAttribute("aria-hidden", "true");
+    return bar;
+  });
+  elements.activityChart.replaceChildren(...bars);
+  elements.activityChart.setAttribute(
+    "aria-label",
+    `${total} motion ${total === 1 ? "capture" : "captures"} across ${buckets.length} periods; peak ${peak}`,
+  );
+  const middle = buckets[Math.floor(buckets.length / 2)] || null;
+  elements.activityAxisStart.textContent = activityTick(activity.starts_at);
+  elements.activityAxisMiddle.textContent = activityTick(middle?.started_at);
+  elements.activityAxisEnd.textContent = viewState.eventWindow === "24h"
+    ? activityTime.format(new Date(activity.ends_at))
+    : "Now";
+}
+
 function renderEvents() {
   elements.eventGrid.replaceChildren(...viewState.events.map(createEventItem));
   elements.eventsEmpty.hidden = viewState.events.length > 0;
   elements.eventsEmpty.textContent = "No motion captures in this range.";
   elements.eventPagination.hidden = viewState.eventCursor == null;
+  renderEventActivity();
   renderEventSummary();
 }
 
@@ -1297,12 +1380,14 @@ async function refreshEvents({ append = false } = {}) {
     viewState.events = append ? [...viewState.events, ...payload.events] : payload.events;
     viewState.eventCursor = payload.next_before;
     viewState.eventSummary = payload.summary;
+    viewState.eventActivity = payload.activity;
     renderEvents();
   } catch (error) {
     if (!append) {
       viewState.events = [];
       viewState.eventCursor = null;
       viewState.eventSummary = null;
+      viewState.eventActivity = null;
       elements.eventGrid.replaceChildren();
       elements.eventsEmpty.hidden = false;
       elements.eventsEmpty.textContent = error.message;
@@ -1310,6 +1395,7 @@ async function refreshEvents({ append = false } = {}) {
     elements.eventPagination.hidden = append ? viewState.eventCursor == null : true;
     elements.eventsMeta.textContent = "Archive unavailable";
     elements.retentionMeta.textContent = "Archive policy unavailable";
+    renderEventActivity();
   } finally {
     setEventsBusy(false);
   }
@@ -1319,10 +1405,12 @@ function selectEventWindow(windowName) {
   if (viewState.eventsBusy || windowName === viewState.eventWindow) return;
   viewState.eventWindow = windowName;
   viewState.eventCursor = null;
+  viewState.eventActivity = null;
   viewState.events = [];
   eventRangeButtons.forEach((button) => {
     button.setAttribute("aria-pressed", String(button.dataset.eventWindow === windowName));
   });
+  renderEventActivity();
   refreshEvents();
 }
 
