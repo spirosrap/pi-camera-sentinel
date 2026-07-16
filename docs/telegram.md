@@ -69,6 +69,12 @@ SENTINEL_CHANGED_RATIO=0.05
 
 The private dashboard can enable a daily quiet-hours schedule. Motion detected during that window is still saved to the local event archive, but Telegram photos, messages, and clips are suppressed.
 
+## Feed Recovery Updates
+
+Set `SENTINEL_RECOVERY_TELEGRAM_ALERTS=1` to receive text updates when automatic feed recovery restarts the stream, cannot restart it, or confirms that it recovered. These operational messages are independent of motion quiet hours. Transient failed checks and manual restart actions do not send messages.
+
+Recovery delivery is deduplicated through the persisted recovery state. Existing incidents are not replayed when the option is first enabled, and a Telegram failure is retried without interrupting the camera watchdog.
+
 Set the schedule timezone in `/etc/pi-camera-sentinel.env`:
 
 ```text

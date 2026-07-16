@@ -22,6 +22,7 @@ This project is intentionally small: no cloud camera account, no public port for
 - Automatically restarts an unavailable or stale feed after repeated failed checks.
 - Automatically reconnects open dashboards after stream, network, or tab-suspension interruptions.
 - Records recent feed outages, restart attempts, and successful recoveries.
+- Can send deduplicated Telegram updates when automatic feed recovery acts.
 - Includes health checks for feed availability, live Pi power throttling, and storage.
 - Reports low storage, CPU temperature, frame freshness, and camera availability.
 - Shows live motion-alert and exposure-watchdog service state with pause and resume controls.
@@ -130,6 +131,7 @@ The `pi-camera-sentinel serve` command provides a small same-origin web app on p
 - camera, live Raspberry Pi power flags, temperature, uptime, and storage status
 - motion-alert and exposure-recovery state with pause and resume toggles
 - feed-recovery state, incident history, manual restart action, and pause control
+- active operational Telegram alert state for automatic feed recovery
 - active Telegram alert-batching window and photo limit
 - secret-safe Home Assistant webhook state and test delivery
 - quiet-hours schedule controls for Telegram notifications
@@ -169,6 +171,14 @@ SENTINEL_RECOVERY_COOLDOWN_SECONDS=120
 A failed HTTP request, non-image or empty response, explicit ustreamer offline signal, or frame timestamp older than the stale limit counts as a failure. Identical pixels do not count as stale, so a still scene cannot cause a restart loop. Recovery state, restart totals, and the 20 most recent incidents are stored atomically in `SENTINEL_RECOVERY_STATE_FILE` and displayed in the dashboard. The dashboard also provides a guarded **Restart feed** action for immediate intervention.
 
 Open dashboard tabs recover separately from the Pi watchdog. An interrupted browser stream retries after 1, 2, 4, 8, 16, and then at most 30 seconds. It reconnects immediately when the status API or browser reports recovery, and refreshes after a tab has been hidden for at least 15 seconds. Pausing the live view cancels and suppresses retries until it is resumed.
+
+Enable operational Telegram updates for automatic restart attempts and their eventual recovery with:
+
+```text
+SENTINEL_RECOVERY_TELEGRAM_ALERTS=1
+```
+
+These alerts use the existing bot and chat configuration. They ignore transient failed checks and manual dashboard restarts, do not replay old history when first enabled, and are not suppressed by motion quiet hours. Telegram delivery failures never block the watchdog and retry on its next cycle.
 
 Run one check manually with `pi-camera-sentinel recovery-step --json`. See [docs/recovery.md](docs/recovery.md).
 

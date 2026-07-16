@@ -85,6 +85,7 @@ def test_collect_dashboard_status_for_online_feed(tmp_path):
     }
     assert result["automation"]["feed_recovery"]["state"]["status"] == "unknown"
     assert result["automation"]["feed_recovery"]["failure_threshold"] == 3
+    assert result["automation"]["feed_recovery"]["telegram_alerts"] is False
     assert result["integrations"]["home_assistant"]["configured"] is False
 
 
@@ -102,6 +103,26 @@ def test_collect_dashboard_status_marks_active_power_limit_as_degraded(tmp_path)
     assert result["system"]["power"]["state"] == "active"
     assert result["system"]["power"]["current_issues"] == ("Undervoltage", "CPU throttled")
     assert any("active Pi power limit" in warning for warning in result["warnings"])
+
+
+def test_dashboard_status_reports_configured_recovery_telegram_alerts(tmp_path):
+    settings = replace(
+        dashboard_settings(tmp_path),
+        recovery_telegram_alerts=True,
+        telegram_token="token",
+        telegram_chat_id="123",
+    )
+
+    result = collect_dashboard_status(
+        settings,
+        power_status=power_status(),
+        snapshot_get=lambda *_args, **_kwargs: FakeResponse(
+            jpeg_bytes(),
+            {"content-type": "image/jpeg"},
+        ),
+    )
+
+    assert result["automation"]["feed_recovery"]["telegram_alerts"] is True
 
 
 def test_collect_dashboard_status_does_not_degrade_for_historical_power_flag(tmp_path):

@@ -11,6 +11,7 @@ from pi_camera_sentinel import cli
 from pi_camera_sentinel.batching import MotionBatch, MotionSample
 from pi_camera_sentinel.config import Settings
 from pi_camera_sentinel.policy import AlertPolicy, save_alert_policy
+from pi_camera_sentinel.recovery import RecoveryState
 
 
 def motion_settings(tmp_path) -> Settings:
@@ -155,3 +156,23 @@ def test_retention_cleanup_dry_run_reports_candidates_without_deleting(tmp_path,
     assert payload["candidates"] == [{"name": oldest.name, "reason": "count"}]
     assert payload["result"]["dry_run"] is True
     assert newest.exists() and oldest.exists()
+
+
+def test_recovery_alert_failure_does_not_block_watchdog_state(monkeypatch, tmp_path, caplog):
+    settings = replace(
+        motion_settings(tmp_path),
+        recovery_state_file=tmp_path / "recovery-state.json",
+    )
+    state = RecoveryState(status="restarted", stream_service=settings.stream_service)
+    monkeypatch.setattr(cli, "prepared_recovery_state", lambda _settings: RecoveryState())
+    monkeypatch.setattr(cli, "recovery_watchdog_step", lambda *_args: state)
+    monkeypatch.setattr(
+        cli,
+        "process_recovery_alerts",
+        lambda *_args: (_ for _ in ()).throw(RuntimeError("Telegram offline")),
+    )
+
+    result = cli.recovery_step_with_alerts(settings)
+
+    assert result is state
+    assert "delivery will retry" in caplog.text

@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.5.0 - 2026-07-16
+
+- Add optional Telegram alerts for automatic feed restart attempts and recoveries.
+- Persist a notification cursor in recovery state for deduplication across service restarts.
+- Treat existing recovery history as a migration baseline instead of replaying old incidents.
+- Retry failed Telegram delivery on the next watchdog cycle without blocking camera recovery.
+- Skip transient failed checks and user-requested restarts to keep operational alerts concise.
+- Advance the cursor while alerts are disabled so enabling them never releases a backlog.
+- Show active recovery Telegram alerts in the dashboard monitoring status.
+
 ## 1.4.0 - 2026-07-16
 
 - Classify snapshots older than the configured recovery threshold as stale.

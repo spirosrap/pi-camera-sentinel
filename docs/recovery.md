@@ -69,3 +69,17 @@ The system watchdog recovers the stream process on the Pi. Each open dashboard a
 The live-view notice shows the current retry state. **Pause** cancels any pending timer and disables automatic reconnects until **Resume** is selected. This prevents the recovery loop from consuming bandwidth when the user intentionally stopped the live view.
 
 The dashboard status API uses `SENTINEL_RECOVERY_STALE_SECONDS` for the same stale-frame decision as the system watchdog. A stale snapshot can still be a valid image response, but it no longer reports the camera as online.
+
+## Telegram Recovery Alerts
+
+Operational alerts are optional and use the same bot token and chat ID as motion notifications:
+
+```text
+SENTINEL_RECOVERY_TELEGRAM_ALERTS=1
+```
+
+The watchdog sends concise messages when an automatic stream restart succeeds, an automatic restart attempt fails, and the feed later recovers. A single failed check is not reported, and a manual dashboard restart is not echoed back to the person who requested it. Recovery alerts are operational, so motion quiet hours do not suppress them.
+
+The recovery state stores a cursor for the last processed event. On the first v1.5 startup, existing history becomes the baseline and is not replayed. While alerts are disabled, the cursor continues advancing so a later opt-in cannot release a backlog.
+
+Camera recovery state is saved before Telegram delivery. If Telegram is unavailable, the watchdog keeps operating and retries the same pending alert during its next cycle. The cursor advances only after successful delivery or after an event is intentionally ignored.

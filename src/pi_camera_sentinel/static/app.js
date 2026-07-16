@@ -437,7 +437,8 @@ function recoveryDetail(recovery) {
   const state = recovery.state;
   const restarts = Number(state.restart_count) || 0;
   const restartLabel = restarts === 1 ? "1 recovery" : `${restarts} recoveries`;
-  if (state.status === "healthy") return `Healthy / ${restartLabel}`;
+  const alertsLabel = recovery.telegram_alerts ? " / Telegram alerts" : "";
+  if (state.status === "healthy") return `Healthy / ${restartLabel}${alertsLabel}`;
   if (state.status === "failing") {
     return `${state.consecutive_failures}/${recovery.failure_threshold} failed checks / ${state.last_reason}`;
   }

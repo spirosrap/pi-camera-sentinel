@@ -86,6 +86,7 @@ class RecoveryState:
     cooldown_until: str | None = None
     last_reason: str = "No checks recorded"
     events: tuple[RecoveryEvent, ...] = ()
+    recovery_notification_cursor: str | None = None
 
     def __post_init__(self) -> None:
         if self.status not in RECOVERY_STATUSES:
@@ -135,6 +136,7 @@ class RecoveryState:
             cooldown_until=optional_text("cooldown_until"),
             last_reason=reason,
             events=events[-MAX_RECOVERY_EVENTS:],
+            recovery_notification_cursor=optional_text("recovery_notification_cursor"),
         )
 
     def to_dict(self) -> dict[str, object]:

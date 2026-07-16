@@ -190,6 +190,19 @@ def test_recovery_state_loads_v1_state_without_events(tmp_path):
     assert state.restart_count == 2
     assert state.stream_service == "camera-stream.service"
     assert state.events == ()
+    assert state.recovery_notification_cursor is None
+
+
+def test_recovery_notification_cursor_round_trip(tmp_path):
+    path = tmp_path / "recovery-state.json"
+    expected = RecoveryState(
+        status="healthy",
+        recovery_notification_cursor="2026-07-16T08:00:00+00:00|feed_recovered|",
+    )
+
+    save_recovery_state(path, expected)
+
+    assert load_recovery_state(path) == expected
 
 
 def test_recovery_event_history_is_bounded():

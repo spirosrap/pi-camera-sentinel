@@ -68,6 +68,7 @@ def test_feed_recovery_configuration(monkeypatch, tmp_path):
     monkeypatch.setenv("SENTINEL_RECOVERY_FAILURE_THRESHOLD", "4")
     monkeypatch.setenv("SENTINEL_RECOVERY_STALE_SECONDS", "30")
     monkeypatch.setenv("SENTINEL_RECOVERY_COOLDOWN_SECONDS", "180")
+    monkeypatch.setenv("SENTINEL_RECOVERY_TELEGRAM_ALERTS", "1")
 
     settings = Settings.from_env()
 
@@ -78,3 +79,4 @@ def test_feed_recovery_configuration(monkeypatch, tmp_path):
     assert settings.recovery_failure_threshold == 4
     assert settings.recovery_stale_seconds == 30
     assert settings.recovery_cooldown_seconds == 180
+    assert settings.recovery_telegram_alerts is True

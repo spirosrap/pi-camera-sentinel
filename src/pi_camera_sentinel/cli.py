@@ -24,8 +24,10 @@ from .recovery import (
     RecoveryState,
     load_recovery_state,
     recovery_watchdog_step,
+    save_recovery_state,
     validate_recovery_config,
 )
+from .recovery_alerts import initialize_recovery_alert_cursor, process_recovery_alerts
 from .retention import RetentionPolicy, enforce_retention, policy_from_settings
 from .telegram import get_chat_ids, send_media_group, send_message, send_photo, send_video
 from .webhook import deliver_webhook, webhook_payload
@@ -466,13 +468,30 @@ def recovery_state_or_default(settings: Settings) -> RecoveryState:
         return RecoveryState(stream_service=settings.stream_service)
 
 
+def prepared_recovery_state(settings: Settings) -> RecoveryState:
+    state = recovery_state_or_default(settings)
+    prepared = initialize_recovery_alert_cursor(state)
+    if prepared != state:
+        save_recovery_state(settings.recovery_state_file, prepared)
+    return prepared
+
+
+def recovery_step_with_alerts(settings: Settings) -> RecoveryState:
+    result = recovery_watchdog_step(settings, prepared_recovery_state(settings))
+    try:
+        return process_recovery_alerts(settings, result)
+    except Exception as exc:
+        LOG.warning("feed recovery Telegram alert failed; delivery will retry: %s", exc)
+        return result
+
+
 def cmd_recovery_step(settings: Settings, args: argparse.Namespace) -> int:
     try:
         validate_recovery_config(settings)
     except ValueError as exc:
         LOG.error("invalid feed recovery configuration: %s", exc)
         return 2
-    result = recovery_watchdog_step(settings, recovery_state_or_default(settings))
+    result = recovery_step_with_alerts(settings)
     if args.json:
         print(json.dumps(result.to_dict(), sort_keys=True))
     return 1 if result.status == "failed" else 0
@@ -484,17 +503,25 @@ def cmd_recovery_watchdog(settings: Settings, _args: argparse.Namespace) -> int:
     except ValueError as exc:
         LOG.error("invalid feed recovery configuration: %s", exc)
         return 2
+    missing_telegram = settings.missing_telegram_fields()
+    telegram_alerts = settings.recovery_telegram_alerts and not missing_telegram
+    if settings.recovery_telegram_alerts and missing_telegram:
+        LOG.warning(
+            "feed recovery Telegram alerts disabled; missing: %s",
+            ", ".join(missing_telegram),
+        )
     LOG.info(
-        "starting feed recovery interval=%ss failures=%s stale=%ss cooldown=%ss stream=%s",
+        "starting feed recovery interval=%ss failures=%s stale=%ss cooldown=%ss stream=%s telegram_alerts=%s",
         settings.recovery_interval_seconds,
         settings.recovery_failure_threshold,
         settings.recovery_stale_seconds,
         settings.recovery_cooldown_seconds,
         settings.stream_service,
+        "on" if telegram_alerts else "off",
     )
     while True:
         try:
-            state = recovery_watchdog_step(settings, recovery_state_or_default(settings))
+            state = recovery_step_with_alerts(settings)
             LOG.info(
                 "feed recovery status=%s failures=%s restarts=%s reason=%s",
                 state.status,

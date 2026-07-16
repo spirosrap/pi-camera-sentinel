@@ -198,6 +198,10 @@ def collect_dashboard_status(
                 "failure_threshold": settings.recovery_failure_threshold,
                 "stale_seconds": settings.recovery_stale_seconds,
                 "cooldown_seconds": settings.recovery_cooldown_seconds,
+                "telegram_alerts": (
+                    settings.recovery_telegram_alerts
+                    and not settings.missing_telegram_fields()
+                ),
                 "state": recovery_state.to_dict(),
             },
         },

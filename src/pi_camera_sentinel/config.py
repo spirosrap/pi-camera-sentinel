@@ -91,6 +91,7 @@ class Settings:
     recovery_failure_threshold: int
     recovery_stale_seconds: float
     recovery_cooldown_seconds: float
+    recovery_telegram_alerts: bool
     policy_file: Path
     mask_file: Path
     timezone: str
@@ -175,6 +176,7 @@ class Settings:
             recovery_failure_threshold=env_int("SENTINEL_RECOVERY_FAILURE_THRESHOLD", 3),
             recovery_stale_seconds=env_float("SENTINEL_RECOVERY_STALE_SECONDS", 20.0),
             recovery_cooldown_seconds=env_float("SENTINEL_RECOVERY_COOLDOWN_SECONDS", 120.0),
+            recovery_telegram_alerts=env_bool("SENTINEL_RECOVERY_TELEGRAM_ALERTS", False),
             policy_file=policy_file,
             mask_file=mask_file,
             timezone=env_str("SENTINEL_TIMEZONE", "local", "MOTION_TIMEZONE"),
