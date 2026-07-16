@@ -6,8 +6,8 @@
     <meta name="theme-color" content="#171a18">
     <meta name="color-scheme" content="light">
     <title>Pi Camera Sentinel</title>
-    <link rel="stylesheet" href="/assets/styles.css?v=1.9.0">
-    <script src="/assets/app.js?v=1.9.0" defer></script>
+    <link rel="stylesheet" href="/assets/styles.css?v=1.10.0">
+    <script src="/assets/app.js?v=1.10.0" defer></script>
   </head>
   <body>
     <header class="topbar">
@@ -17,7 +17,7 @@
           <span class="brand-kicker">Private camera</span>
           <span class="brand-name-row">
             <strong id="app-title">Pi Camera Sentinel</strong>
-            <span class="app-version" id="app-version">v1.9.0</span>
+            <span class="app-version" id="app-version">v1.10.0</span>
           </span>
         </span>
       </a>
@@ -44,7 +44,7 @@
         </div>
 
         <div class="stream-shell" id="stream-shell" data-state="connecting">
-          <img id="camera-stream" alt="Live Pi camera feed">
+          <img id="camera-stream" alt="Live Pi camera feed" decoding="async" fetchpriority="high">
           <div class="stream-notice" id="stream-notice" role="status">Connecting to camera</div>
         </div>
 
@@ -92,7 +92,7 @@
         </article>
       </section>
 
-      <section class="monitoring-section" aria-labelledby="monitoring-heading">
+      <section class="monitoring-section" id="monitoring-section" aria-labelledby="monitoring-heading">
         <div class="section-heading">
           <div>
             <p class="section-kicker">Automation</p>
@@ -238,7 +238,7 @@
         </div>
       </section>
 
-      <section class="motion-mask-section" aria-labelledby="motion-mask-heading">
+      <section class="motion-mask-section" id="motion-mask-section" aria-labelledby="motion-mask-heading">
         <div class="section-heading">
           <div>
             <p class="section-kicker">Detection filter</p>
@@ -259,7 +259,7 @@
           </div>
 
           <div class="mask-preview-shell" id="motion-mask-preview-shell">
-            <img id="motion-mask-preview" alt="Current camera frame for editing ignored motion areas">
+            <img id="motion-mask-preview" alt="Current camera frame for editing ignored motion areas" loading="lazy" decoding="async">
             <canvas id="motion-mask-canvas" aria-label="Ignored motion areas"></canvas>
             <div class="mask-preview-notice" id="motion-mask-preview-notice" role="status">Loading frame</div>
           </div>
@@ -271,7 +271,7 @@
         </div>
       </section>
 
-      <section class="tuning-section" aria-labelledby="tuning-heading">
+      <section class="tuning-section" id="tuning-section" aria-labelledby="tuning-heading">
         <div class="section-heading">
           <div>
             <p class="section-kicker">Device controls</p>
@@ -343,7 +343,7 @@
         </div>
       </section>
 
-      <section class="events-section" aria-labelledby="events-heading">
+      <section class="events-section" id="events-section" aria-labelledby="events-heading">
         <div class="section-heading">
           <div>
             <p class="section-kicker">Motion archive</p>
@@ -396,7 +396,7 @@
             </div>
           </div>
         </div>
-        <div class="event-grid" id="event-grid"></div>
+        <div class="event-grid" id="event-grid" aria-busy="false"></div>
         <p class="empty-state" id="events-empty" hidden>No motion captures in this range.</p>
         <div class="event-pagination" id="event-pagination" hidden>
           <button type="button" id="events-load-more">Load older captures</button>
@@ -428,7 +428,7 @@
         <button class="capture-nav capture-previous" type="button" id="capture-previous" title="Previous capture" aria-label="Previous capture">
           <span aria-hidden="true">&#8592;</span>
         </button>
-        <img id="capture-image" alt="Selected motion capture">
+        <img id="capture-image" alt="Selected motion capture" decoding="async" fetchpriority="high">
         <span class="capture-image-status" id="capture-image-status" role="status" hidden>Loading capture</span>
         <button class="capture-nav capture-next" type="button" id="capture-next" title="Next capture" aria-label="Next capture">
           <span aria-hidden="true">&#8594;</span>

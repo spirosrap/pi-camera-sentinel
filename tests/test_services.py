@@ -2,7 +2,13 @@ import subprocess
 
 import pytest
 
-from pi_camera_sentinel.services import restart_service, service_state, set_service_active, valid_service_name
+from pi_camera_sentinel.services import (
+    restart_service,
+    service_state,
+    service_states,
+    set_service_active,
+    valid_service_name,
+)
 
 
 class FakeRunner:
@@ -55,6 +61,53 @@ def test_service_state_reports_missing_unit_without_raising():
     assert result["available"] is False
     assert result["state"] == "unavailable"
     assert result["error"] == "systemd service is not installed"
+
+
+def test_service_states_batches_multiple_units_in_one_call():
+    runner = FakeRunner(
+        [
+            completed(
+                "\n\n".join(
+                    [
+                        "\n".join(
+                            [
+                                "Id=motion.service",
+                                "LoadState=loaded",
+                                "ActiveState=active",
+                                "SubState=running",
+                                "UnitFileState=enabled",
+                                "ActiveEnterTimestamp=Tue 2026-07-14 16:40:09 BST",
+                                "InactiveEnterTimestamp=",
+                            ]
+                        ),
+                        "\n".join(
+                            [
+                                "Id=watchdog.service",
+                                "LoadState=loaded",
+                                "ActiveState=inactive",
+                                "SubState=dead",
+                                "UnitFileState=enabled",
+                                "ActiveEnterTimestamp=",
+                                "InactiveEnterTimestamp=Tue 2026-07-14 17:00:00 BST",
+                            ]
+                        ),
+                    ]
+                )
+            )
+        ]
+    )
+
+    result = service_states(["motion.service", "watchdog.service"], runner=runner)
+
+    assert result["motion.service"]["active"] is True
+    assert result["watchdog.service"]["state"] == "paused"
+    assert len(runner.commands) == 1
+    assert runner.commands[0][:4] == [
+        "systemctl",
+        "show",
+        "motion.service",
+        "watchdog.service",
+    ]
 
 
 def test_set_service_active_uses_only_start_or_stop():

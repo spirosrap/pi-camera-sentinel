@@ -1,16 +1,21 @@
 from __future__ import annotations
 
 import datetime as dt
+import gzip
 import io
 import json
 import logging
 import math
 import mimetypes
+import os
+import shutil
 import socket
 import subprocess
 import sys
 import threading
 import time
+from email.utils import formatdate
+from functools import lru_cache
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -28,8 +33,14 @@ from .health_alerts import HealthAlertState, load_health_alert_state
 from .masks import MAX_MOTION_MASKS, load_motion_masks, save_motion_masks, validate_motion_masks
 from .policy import AlertPolicy, load_alert_policy, save_alert_policy
 from .recovery import RecoveryState, load_recovery_state, manual_restart_feed
-from .retention import RetentionPolicy, plan_retention, policy_from_settings
-from .services import service_state, set_service_active
+from .retention import (
+    ArchiveFile,
+    RetentionPolicy,
+    archive_files,
+    plan_retention,
+    policy_from_settings,
+)
+from .services import service_states, set_service_active
 from .webhook import deliver_webhook, webhook_payload
 
 
@@ -49,6 +60,13 @@ EVENT_WINDOWS = {
 }
 MAX_EVENT_PAGE_SIZE = 48
 MAX_ACTIVITY_BUCKETS = 14
+EVENT_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
+EVENT_THUMBNAIL_SIZE = (480, 270)
+EVENT_THUMBNAIL_QUALITY = 72
+IMMUTABLE_CACHE_SECONDS = 365 * 24 * 60 * 60
+SERVICE_STATUS_CACHE_SECONDS = 5.0
+LUMA_SAMPLE_SECONDS = 30.0
+MIN_GZIP_BYTES = 1024
 
 
 def read_system_uptime() -> float | None:
@@ -60,9 +78,41 @@ def read_system_uptime() -> float | None:
 
 
 def frame_luma(image: Image.Image) -> float:
-    sample = image.convert("L")
-    sample.thumbnail((320, 180), Image.Resampling.BILINEAR)
+    image.draft("L", (320, 180))
+    image.load()
+    sample = image if image.mode == "L" else image.convert("L")
+    if sample.width > 320 or sample.height > 180:
+        sample.thumbnail((320, 180), Image.Resampling.BILINEAR)
     return round(ImageStat.Stat(sample).mean[0], 1)
+
+
+@lru_cache(maxsize=256)
+def event_thumbnail_bytes(path_text: str, _modified_ns: int, _size_bytes: int) -> bytes:
+    with Image.open(path_text) as image:
+        image.draft("RGB", EVENT_THUMBNAIL_SIZE)
+        image.load()
+        if image.mode not in {"RGB", "L"}:
+            image = image.convert("RGB")
+        image.thumbnail(EVENT_THUMBNAIL_SIZE, Image.Resampling.BILINEAR)
+        output = io.BytesIO()
+        image.save(output, format="JPEG", quality=EVENT_THUMBNAIL_QUALITY)
+        return output.getvalue()
+
+
+def directory_signature(directory: Path) -> tuple[int, int] | None:
+    try:
+        stat = directory.stat()
+    except OSError:
+        return None
+    return stat.st_mtime_ns, stat.st_ctime_ns
+
+
+def positive_header_int(headers: object, name: str) -> int | None:
+    try:
+        value = int(getattr(headers, "get")(name, ""))
+    except (AttributeError, TypeError, ValueError):
+        return None
+    return value if value > 0 else None
 
 
 def collect_dashboard_status(
@@ -70,6 +120,8 @@ def collect_dashboard_status(
     *,
     power_status: PowerStatus,
     snapshot_get: Callable[..., requests.Response] = requests.get,
+    cached_frame_metrics: tuple[int, int, float] | None = None,
+    sample_luma: bool = True,
 ) -> dict:
     started = time.monotonic()
     feed: dict[str, object] = {
@@ -93,8 +145,15 @@ def collect_dashboard_status(
         response = snapshot_get(settings.snapshot_url, timeout=settings.http_timeout)
         response.raise_for_status()
         content_type = response.headers.get("content-type", "")
-        image = Image.open(io.BytesIO(response.content))
-        image.load()
+        cached_width, cached_height, cached_luma = cached_frame_metrics or (None, None, None)
+        width = positive_header_int(response.headers, "x-ustreamer-width") or cached_width
+        height = positive_header_int(response.headers, "x-ustreamer-height") or cached_height
+        mean_luma = cached_luma
+        if sample_luma or width is None or height is None:
+            with Image.open(io.BytesIO(response.content)) as image:
+                width, height = image.size
+                if sample_luma or mean_luma is None:
+                    mean_luma = frame_luma(image)
         timestamp = response.headers.get("x-timestamp")
         frame_timestamp = float(timestamp) if timestamp else None
         frame_age_seconds = (
@@ -109,8 +168,8 @@ def collect_dashboard_status(
                 "online": response.headers.get("x-ustreamer-online", "true").lower() == "true",
                 "status_code": response.status_code,
                 "content_type": content_type,
-                "width": image.width,
-                "height": image.height,
+                "width": width,
+                "height": height,
                 "frame_timestamp": frame_timestamp,
                 "frame_age_seconds": frame_age_seconds,
                 "stale": bool(
@@ -119,7 +178,7 @@ def collect_dashboard_status(
                 ),
                 "latency_ms": round((time.monotonic() - started) * 1000),
                 "dropped_frames": int(dropped) if dropped is not None else None,
-                "mean_luma": frame_luma(image),
+                "mean_luma": mean_luma,
             }
         )
     except (requests.RequestException, OSError, ValueError) as exc:
@@ -238,18 +297,11 @@ def collect_dashboard_status(
 
 
 def motion_event_records(directory: Path) -> list[tuple[Path, float, int]]:
-    if not directory.exists():
-        return []
-    records: list[tuple[Path, float, int]] = []
-    for path in directory.glob("motion-*"):
-        if not path.is_file() or path.suffix.lower() not in {".jpg", ".jpeg", ".png"}:
-            continue
-        try:
-            stat = path.stat()
-        except OSError:
-            continue
-        records.append((path, stat.st_mtime, stat.st_size))
-    return sorted(records, key=lambda record: (record[1], record[0].name), reverse=True)
+    return [
+        (file.path, file.modified_at, file.size_bytes)
+        for file in archive_files(directory)
+        if file.path.suffix.lower() in EVENT_IMAGE_SUFFIXES
+    ]
 
 
 def event_activity(
@@ -335,6 +387,7 @@ def event_history(
     period_end: float | None = None,
     now: float | None = None,
     retention_policy: RetentionPolicy | None = None,
+    archive: tuple[ArchiveFile, ...] | None = None,
 ) -> dict[str, object]:
     if window not in EVENT_WINDOWS:
         raise ValueError("window must be one of: 24h, 7d, all")
@@ -355,7 +408,12 @@ def event_history(
         if period_start >= period_end:
             raise ValueError("period_start must be earlier than period_end")
 
-    records = motion_event_records(directory)
+    archive_snapshot = archive_files(directory) if archive is None else archive
+    records = [
+        (file.path, file.modified_at, file.size_bytes)
+        for file in archive_snapshot
+        if file.path.suffix.lower() in EVENT_IMAGE_SUFFIXES
+    ]
     current_time = time.time() if now is None else now
     window_seconds = EVENT_WINDOWS[window]
     cutoff = current_time - window_seconds if window_seconds is not None else None
@@ -381,6 +439,10 @@ def event_history(
         {
             "name": path.name,
             "url": f"/events/{quote(path.name)}",
+            "thumbnail_url": (
+                f"/events/thumbnails/{quote(path.name)}"
+                f"?v={int(timestamp * 1000)}-{size}"
+            ),
             "captured_at": dt.datetime.fromtimestamp(timestamp, dt.timezone.utc).isoformat(),
             "size_bytes": size,
         }
@@ -403,6 +465,7 @@ def event_history(
             directory,
             retention_policy,
             now=current_time,
+            files=archive_snapshot,
         ).to_dict()
 
     return {
@@ -482,6 +545,49 @@ def same_origin(origin: str | None, host: str | None) -> bool:
         return False
 
 
+def accepts_gzip(value: str | None) -> bool:
+    if not value:
+        return False
+    qualities: dict[str, float] = {}
+    for item in value.split(","):
+        parts = [part.strip() for part in item.split(";")]
+        encoding = parts[0].lower()
+        quality = 1.0
+        for parameter in parts[1:]:
+            if parameter.lower().startswith("q="):
+                try:
+                    quality = float(parameter[2:])
+                except ValueError:
+                    quality = 0.0
+        qualities[encoding] = quality
+    if "gzip" in qualities:
+        return qualities["gzip"] > 0
+    return qualities.get("*", 0.0) > 0
+
+
+def compressible_content_type(content_type: str) -> bool:
+    media_type = content_type.split(";", 1)[0].strip().lower()
+    return media_type.startswith("text/") or media_type in {
+        "application/javascript",
+        "application/json",
+        "application/xml",
+        "image/svg+xml",
+    }
+
+
+def file_etag(stat: os.stat_result, variant: str = "") -> str:
+    modified_ns = stat.st_mtime_ns
+    size = stat.st_size
+    suffix = f"-{variant}" if variant else ""
+    return f'"{modified_ns:x}-{size:x}{suffix}"'
+
+
+def encoded_etag(etag: str, encoding: str | None) -> str:
+    if not encoding:
+        return etag
+    return f'{etag[:-1]}-{encoding}"'
+
+
 class DashboardApplication:
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -489,25 +595,68 @@ class DashboardApplication:
         self._status_at = 0.0
         self._power: PowerStatus | None = None
         self._power_at = 0.0
+        self._frame_metrics: tuple[int, int, float] | None = None
+        self._frame_metrics_at = 0.0
+        self._archive_cache_ready = False
+        self._archive_files: tuple[ArchiveFile, ...] = ()
+        self._archive_signature: tuple[int, int] | None = None
+        self._services: dict[str, dict[str, object]] | None = None
+        self._services_at = 0.0
         self._camera_lock = threading.RLock()
+        self._event_lock = threading.RLock()
         self._mask_lock = threading.RLock()
         self._policy_lock = threading.RLock()
         self._recovery_lock = threading.RLock()
         self._service_lock = threading.RLock()
+        self._status_lock = threading.RLock()
 
     def status(self) -> dict:
-        now = time.monotonic()
-        if self._status is not None and now - self._status_at < self.settings.dashboard_status_cache_seconds:
+        with self._status_lock:
+            now = time.monotonic()
+            if self._status is not None and now - self._status_at < self.settings.dashboard_status_cache_seconds:
+                return self._status
+            if self._power is None or now - self._power_at >= 60:
+                self._power = read_power_status()
+                self._power_at = now
+            sample_luma = (
+                self._frame_metrics is None
+                or now - self._frame_metrics_at >= LUMA_SAMPLE_SECONDS
+            )
+            self._status = collect_dashboard_status(
+                self.settings,
+                power_status=self._power,
+                cached_frame_metrics=self._frame_metrics,
+                sample_luma=sample_luma,
+            )
+            feed = self._status["feed"]
+            if feed["ok"] and all(
+                isinstance(feed[key], (int, float))
+                for key in ("width", "height", "mean_luma")
+            ):
+                self._frame_metrics = (
+                    int(feed["width"]),
+                    int(feed["height"]),
+                    float(feed["mean_luma"]),
+                )
+                if sample_luma:
+                    self._frame_metrics_at = now
+            self._status_at = now
             return self._status
-        if self._power is None or now - self._power_at >= 60:
-            self._power = read_power_status()
-            self._power_at = now
-        self._status = collect_dashboard_status(
-            self.settings,
-            power_status=self._power,
-        )
-        self._status_at = now
-        return self._status
+
+    def archive_snapshot(self) -> tuple[ArchiveFile, ...]:
+        signature = directory_signature(self.settings.output_dir)
+        with self._event_lock:
+            if self._archive_cache_ready and signature == self._archive_signature:
+                return self._archive_files
+            files = archive_files(self.settings.output_dir)
+            refreshed_signature = directory_signature(self.settings.output_dir)
+            if refreshed_signature != signature:
+                files = archive_files(self.settings.output_dir)
+                refreshed_signature = directory_signature(self.settings.output_dir)
+            self._archive_files = files
+            self._archive_signature = refreshed_signature
+            self._archive_cache_ready = True
+            return files
 
     def events(
         self,
@@ -526,6 +675,7 @@ class DashboardApplication:
             period_start=period_start,
             period_end=period_end,
             retention_policy=policy_from_settings(self.settings),
+            archive=self.archive_snapshot(),
         )
 
     def camera(self) -> dict[str, object]:
@@ -594,18 +744,26 @@ class DashboardApplication:
             try:
                 updated = manual_restart_feed(self.settings, state)
             finally:
-                self._status = None
-                self._status_at = 0.0
+                with self._status_lock:
+                    self._status = None
+                    self._status_at = 0.0
             return updated.to_dict()
 
     def services(self) -> dict[str, dict[str, object]]:
         with self._service_lock:
-            return {
-                "motion": service_state(self.settings.motion_service),
-                "recovery": service_state(self.settings.recovery_service),
-                "health": service_state(self.settings.health_service),
-                "watchdog": service_state(self.settings.exposure_service),
+            now = time.monotonic()
+            if self._services is not None and now - self._services_at < SERVICE_STATUS_CACHE_SECONDS:
+                return self._services
+            names = {
+                "motion": self.settings.motion_service,
+                "recovery": self.settings.recovery_service,
+                "health": self.settings.health_service,
+                "watchdog": self.settings.exposure_service,
             }
+            states = service_states(names.values())
+            self._services = {service_id: states[name] for service_id, name in names.items()}
+            self._services_at = time.monotonic()
+            return self._services
 
     def update_service(self, service_id: str, active: bool) -> dict[str, object]:
         service_names = {
@@ -619,7 +777,10 @@ class DashboardApplication:
         except KeyError as exc:
             raise ValueError("unknown service") from exc
         with self._service_lock:
-            return set_service_active(service_name, active)
+            state = set_service_active(service_name, active)
+            self._services = None
+            self._services_at = 0.0
+            return state
 
 
 class DashboardHTTPServer(ThreadingHTTPServer):
@@ -650,6 +811,10 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         LOG.debug("%s - %s", self.client_address[0], format_string % args)
 
     def end_headers(self) -> None:
+        started_at = getattr(self, "_request_started_at", None)
+        if started_at is not None:
+            duration_ms = (time.perf_counter() - started_at) * 1000
+            self.send_header("Server-Timing", f"app;dur={duration_ms:.1f}")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("X-Frame-Options", "DENY")
@@ -668,11 +833,45 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         *,
         cache_control: str = "no-store",
         content_disposition: str | None = None,
+        etag: str | None = None,
+        last_modified: str | None = None,
     ) -> None:
+        vary_encoding = compressible_content_type(content_type)
+        use_gzip = (
+            vary_encoding
+            and len(body) >= MIN_GZIP_BYTES
+            and accepts_gzip(self.headers.get("Accept-Encoding"))
+        )
+        content_encoding = "gzip" if use_gzip else None
+        response_etag = encoded_etag(etag, content_encoding) if etag else None
+        if response_etag and self.request_etag_matches(response_etag):
+            self.send_response(HTTPStatus.NOT_MODIFIED)
+            self.send_header("Cache-Control", cache_control)
+            self.send_header("ETag", response_etag)
+            if last_modified:
+                self.send_header("Last-Modified", last_modified)
+            if vary_encoding:
+                self.send_header("Vary", "Accept-Encoding")
+            if content_encoding:
+                self.send_header("Content-Encoding", content_encoding)
+            self.end_headers()
+            return
+
+        if use_gzip:
+            body = gzip.compress(body, compresslevel=5, mtime=0)
+
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", cache_control)
+        if response_etag:
+            self.send_header("ETag", response_etag)
+        if last_modified:
+            self.send_header("Last-Modified", last_modified)
+        if vary_encoding:
+            self.send_header("Vary", "Accept-Encoding")
+        if content_encoding:
+            self.send_header("Content-Encoding", content_encoding)
         if content_disposition:
             self.send_header("Content-Disposition", content_disposition)
         self.end_headers()
@@ -683,10 +882,56 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
         self.send_bytes(status, "application/json; charset=utf-8", body)
 
+    def request_etag_matches(self, etag: str) -> bool:
+        candidates = {
+            candidate.strip()
+            for candidate in self.headers.get("If-None-Match", "").split(",")
+        }
+        return "*" in candidates or etag in candidates
+
+    def send_file(
+        self,
+        target: Path,
+        content_type: str,
+        *,
+        cache_control: str,
+        etag_variant: str = "",
+    ) -> None:
+        try:
+            stat = target.stat()
+        except OSError:
+            self.send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+            return
+        etag = file_etag(stat, etag_variant)
+        last_modified = formatdate(stat.st_mtime, usegmt=True)
+        if self.request_etag_matches(etag):
+            self.send_response(HTTPStatus.NOT_MODIFIED)
+            self.send_header("Cache-Control", cache_control)
+            self.send_header("ETag", etag)
+            self.send_header("Last-Modified", last_modified)
+            self.end_headers()
+            return
+
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(stat.st_size))
+        self.send_header("Cache-Control", cache_control)
+        self.send_header("ETag", etag)
+        self.send_header("Last-Modified", last_modified)
+        self.end_headers()
+        if self.command == "HEAD":
+            return
+        try:
+            with target.open("rb") as source:
+                shutil.copyfileobj(source, self.wfile, length=64 * 1024)
+        except FileNotFoundError:
+            return
+
     def do_HEAD(self) -> None:
         self.do_GET()
 
     def do_GET(self) -> None:
+        self._request_started_at = time.perf_counter()
         parsed = urlsplit(self.path)
         path = parsed.path
         if path == "/":
@@ -726,12 +971,15 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         elif path == "/snapshot":
             download = parse_qs(parsed.query).get("download") == ["1"]
             self.proxy_snapshot(parsed.query, download=download)
+        elif path.startswith("/events/thumbnails/"):
+            self.serve_event_thumbnail(unquote(path.removeprefix("/events/thumbnails/")))
         elif path.startswith("/events/"):
             self.serve_event(unquote(path.removeprefix("/events/")))
         else:
             self.send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
 
     def do_POST(self) -> None:
+        self._request_started_at = time.perf_counter()
         if not same_origin(self.headers.get("Origin"), self.headers.get("Host")):
             self.send_json({"error": "cross-origin changes are not allowed"}, HTTPStatus.FORBIDDEN)
             return
@@ -866,22 +1114,64 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         if target.parent != STATIC_DIR.resolve() or not target.is_file():
             self.send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
             return
+        try:
+            stat = target.stat()
+            body = target.read_bytes()
+        except OSError:
+            self.send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+            return
         content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
         self.send_bytes(
             HTTPStatus.OK,
             content_type,
-            target.read_bytes(),
-            cache_control="public, max-age=300" if target.name != "index.html" else "no-cache",
+            body,
+            cache_control=(
+                f"public, max-age={IMMUTABLE_CACHE_SECONDS}, immutable"
+                if target.name != "index.html"
+                else "no-cache"
+            ),
+            etag=file_etag(stat),
+            last_modified=formatdate(stat.st_mtime, usegmt=True),
         )
 
-    def serve_event(self, name: str) -> None:
+    def event_target(self, name: str) -> Path | None:
         directory = self.app.settings.output_dir.resolve()
         target = (directory / name).resolve()
         if target.parent != directory or not target.is_file() or not target.name.startswith("motion-"):
+            return None
+        return target
+
+    def serve_event(self, name: str) -> None:
+        target = self.event_target(name)
+        if target is None:
             self.send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
             return
         content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
-        self.send_bytes(HTTPStatus.OK, content_type, target.read_bytes(), cache_control="private, max-age=3600")
+        self.send_file(
+            target,
+            content_type,
+            cache_control=f"private, max-age={IMMUTABLE_CACHE_SECONDS}, immutable",
+        )
+
+    def serve_event_thumbnail(self, name: str) -> None:
+        target = self.event_target(name)
+        if target is None or target.suffix.lower() not in EVENT_IMAGE_SUFFIXES:
+            self.send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
+            return
+        try:
+            stat = target.stat()
+            body = event_thumbnail_bytes(str(target), stat.st_mtime_ns, stat.st_size)
+        except OSError:
+            self.send_json({"error": "thumbnail unavailable"}, HTTPStatus.SERVICE_UNAVAILABLE)
+            return
+        self.send_bytes(
+            HTTPStatus.OK,
+            "image/jpeg",
+            body,
+            cache_control=f"private, max-age={IMMUTABLE_CACHE_SECONDS}, immutable",
+            etag=file_etag(stat, "thumb-v1"),
+            last_modified=formatdate(stat.st_mtime, usegmt=True),
+        )
 
     def copy_proxy_headers(self, response: requests.Response) -> None:
         for name, value in response.headers.items():

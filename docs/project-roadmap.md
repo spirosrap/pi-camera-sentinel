@@ -22,6 +22,7 @@
 - range-aware motion activity insights from retained captures
 - interactive activity period drill-down with server-side filtering
 - continuous archive review viewer with seamless pagination
+- fast-path dashboard loading, bounded thumbnails, and cached system inspection
 - systemd installer
 
 ## Non-Goals For Now

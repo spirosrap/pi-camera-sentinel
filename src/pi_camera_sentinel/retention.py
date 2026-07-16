@@ -147,20 +147,21 @@ def plan_retention(
     policy: RetentionPolicy,
     *,
     now: float | None = None,
+    files: tuple[ArchiveFile, ...] | None = None,
 ) -> RetentionPlan:
     current_time = time.time() if now is None else now
     if not math.isfinite(current_time) or current_time <= 0:
         raise ValueError("retention timestamp must be positive")
-    files = archive_files(directory)
+    archive = archive_files(directory) if files is None else files
     removals: dict[Path, ArchiveRemoval] = {}
 
     if policy.max_age_days > 0:
         cutoff = current_time - (policy.max_age_days * 86400)
-        for file in files:
+        for file in archive:
             if file.modified_at < cutoff:
                 removals[file.path] = ArchiveRemoval(file, "age")
 
-    remaining = [file for file in files if file.path not in removals]
+    remaining = [file for file in archive if file.path not in removals]
     if policy.max_files > 0:
         for file in remaining[policy.max_files :]:
             removals[file.path] = ArchiveRemoval(file, "count")
@@ -177,9 +178,9 @@ def plan_retention(
                 retained_bytes += file.size_bytes
 
     ordered_removals = tuple(
-        removals[file.path] for file in files if file.path in removals
+        removals[file.path] for file in archive if file.path in removals
     )
-    return RetentionPlan(policy, files, ordered_removals)
+    return RetentionPlan(policy, archive, ordered_removals)
 
 
 def apply_retention(plan: RetentionPlan, *, dry_run: bool = False) -> RetentionResult:

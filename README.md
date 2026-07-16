@@ -11,6 +11,7 @@ This project is intentionally small: no cloud camera account, no public port for
 - Summarizes motion activity with range-aware trends and peak periods.
 - Drills from activity periods into their exact retained captures.
 - Reviews captures continuously with keyboard navigation and automatic archive paging.
+- Uses lightweight in-memory gallery thumbnails and lazy dashboard initialization for fast remote access.
 - Optionally exposes the feed privately through Tailscale Serve.
 - Watches snapshots for motion using frame differencing.
 - Supports dashboard-drawn ignored areas for excluding noisy motion zones.
@@ -159,6 +160,8 @@ The `pi-camera-sentinel serve` command provides a small same-origin web app on p
 The event API at `/api/events` accepts a validated `window` (`24h`, `7d`, or `all`), a page `limit`, an optional `before` cursor, and paired `period_start` / `period_end` timestamps for activity drill-down. Responses include retained-file counts, storage totals, archive-retention state, reconciled activity buckets, and selected-period metadata as well as the current page. See [docs/activity-insights.md](docs/activity-insights.md).
 
 Selecting a retained event opens a continuous review viewer with keyboard navigation, automatic page loading, and original-file download. See [docs/archive-review.md](docs/archive-review.md).
+
+The dashboard keeps the live view on the critical path, defers lower sections until they approach the viewport, compresses text responses, and serves bounded in-memory event thumbnails while retaining original captures unchanged. See [docs/performance.md](docs/performance.md).
 
 The server proxies `/stream` and `/snapshot` to `ustreamer`, which keeps the raw camera port private when Tailscale Serve points at the dashboard.
 

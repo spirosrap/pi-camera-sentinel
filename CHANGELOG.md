@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.10.0 - 2026-07-16
+
+- Prioritize the live stream and defer below-the-fold dashboard work until it approaches view.
+- Pause periodic API work in hidden tabs and refresh active sections when the page returns.
+- Add bounded in-memory 480 x 270 event thumbnails without creating a second on-disk archive.
+- Keep full-resolution captures for the review viewer and delay adjacent preloads until the selected image is ready.
+- Append older event tiles in place and retain visible content while filters refresh.
+- Cache archive metadata by directory generation and reuse the same scan for retention summaries.
+- Batch four systemd status reads into one process and cache the result briefly.
+- Downsample JPEGs in the decoder and reuse brightness metrics between 30-second samples.
+- Gzip compress text and JSON responses and add conditional ETags for cacheable resources.
+- Stream original event files instead of buffering every response in memory.
+- Add request timeouts, single-flight polling guards, and backend timing response headers.
+- Add performance and cache regression coverage across the dashboard stack.
+
 ## 1.9.0 - 2026-07-16
 
 - Replace the basic capture popup with a responsive archive review viewer.

@@ -49,11 +49,16 @@ button {
   font-weight: 650;
   letter-spacing: 0;
   cursor: pointer;
+  transition: border-color 120ms ease, background-color 120ms ease, opacity 120ms ease;
 }
 
 button:hover {
   border-color: var(--ink);
   background: #f8faf7;
+}
+
+button:active:not(:disabled) {
+  filter: brightness(0.97);
 }
 
 button:focus-visible,
@@ -72,8 +77,7 @@ a:focus-visible {
   min-height: 68px;
   padding: 10px max(20px, calc((100vw - 1420px) / 2));
   border-bottom: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.96);
-  backdrop-filter: blur(14px);
+  background: var(--surface);
 }
 
 .brand {
@@ -414,6 +418,13 @@ main {
 .motion-mask-section,
 .tuning-section {
   margin-top: 42px;
+}
+
+.motion-mask-section,
+.tuning-section,
+.events-section {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 720px;
 }
 
 .mask-editor-surface {
@@ -1193,6 +1204,7 @@ main {
   border-radius: 6px;
   background: var(--surface);
   text-align: left;
+  transition: border-color 120ms ease, opacity 120ms ease;
 }
 
 .event-item:hover {
@@ -1205,7 +1217,22 @@ main {
   width: 100%;
   aspect-ratio: 16 / 9;
   object-fit: cover;
-  background: var(--viewer);
+  background: #e8ece8;
+  opacity: 0.45;
+  transition: opacity 140ms ease;
+}
+
+.event-item[data-state="ready"] img {
+  opacity: 1;
+}
+
+.event-item[data-state="error"] img {
+  opacity: 0.2;
+}
+
+.events-section[data-state="loading"] .event-item {
+  opacity: 0.62;
+  pointer-events: none;
 }
 
 .event-item span {
@@ -1815,5 +1842,6 @@ dialog::backdrop {
   *::before,
   *::after {
     scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
   }
 }

@@ -1,5 +1,6 @@
 import io
 import os
+import threading
 from dataclasses import replace
 
 import pytest
@@ -9,8 +10,11 @@ from PIL import Image
 from pi_camera_sentinel.config import Settings
 from pi_camera_sentinel.dashboard import (
     DashboardApplication,
+    DashboardHTTPServer,
+    accepts_gzip,
     collect_dashboard_status,
     event_history,
+    event_thumbnail_bytes,
     list_recent_events,
     parse_event_query,
     same_origin,
@@ -24,7 +28,7 @@ from pi_camera_sentinel.health_alerts import (
     save_health_alert_state,
 )
 from pi_camera_sentinel.recovery import RecoveryEvent, RecoveryState
-from pi_camera_sentinel.retention import RetentionPolicy
+from pi_camera_sentinel.retention import RetentionPolicy, archive_files as read_archive_files
 
 
 class FakeResponse:
@@ -58,6 +62,20 @@ def dashboard_settings(tmp_path) -> Settings:
 
 def power_status(flags: int = 0, recent: bool = False):
     return power_status_from_flags((flags, hex(flags)), recent)
+
+
+@pytest.fixture
+def dashboard_server(tmp_path):
+    settings = dashboard_settings(tmp_path)
+    server = DashboardHTTPServer(("127.0.0.1", 0), DashboardApplication(settings))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}", settings
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
 
 
 def test_collect_dashboard_status_for_online_feed(tmp_path):
@@ -96,6 +114,35 @@ def test_collect_dashboard_status_for_online_feed(tmp_path):
     assert result["automation"]["health_alerts"]["telegram_alerts"] is False
     assert result["automation"]["health_alerts"]["state"]["initialized"] is False
     assert result["integrations"]["home_assistant"]["configured"] is False
+
+
+def test_collect_dashboard_status_reuses_recent_frame_metrics(monkeypatch, tmp_path):
+    response = FakeResponse(
+        b"already validated by the previous sample",
+        {
+            "content-type": "image/jpeg",
+            "x-ustreamer-width": "1280",
+            "x-ustreamer-height": "720",
+            "x-ustreamer-online": "true",
+        },
+    )
+    def fail_open(*_args, **_kwargs):
+        raise AssertionError("unexpected decode")
+
+    monkeypatch.setattr("pi_camera_sentinel.dashboard.Image.open", fail_open)
+
+    result = collect_dashboard_status(
+        dashboard_settings(tmp_path),
+        power_status=power_status(),
+        snapshot_get=lambda *_args, **_kwargs: response,
+        cached_frame_metrics=(1280, 720, 137.5),
+        sample_luma=False,
+    )
+
+    assert result["feed"]["width"] == 1280
+    assert result["feed"]["height"] == 720
+    assert result["feed"]["mean_luma"] == 137.5
+    assert result["feed"]["online"] is True
 
 
 def test_collect_dashboard_status_marks_active_power_limit_as_degraded(tmp_path):
@@ -238,6 +285,70 @@ def test_list_recent_events_sorts_and_filters(tmp_path):
 
     assert [event["name"] for event in events] == ["motion-newer.jpg", "motion-older.jpg"]
     assert events[0]["url"] == "/events/motion-newer.jpg"
+    assert events[0]["thumbnail_url"].startswith("/events/thumbnails/motion-newer.jpg?v=")
+
+
+def test_event_thumbnail_is_small_bounded_jpeg(tmp_path):
+    source = tmp_path / "motion-thumbnail.jpg"
+    source.write_bytes(jpeg_bytes((40, 120, 200)))
+    stat = source.stat()
+
+    thumbnail = event_thumbnail_bytes(str(source), stat.st_mtime_ns, stat.st_size)
+
+    with Image.open(io.BytesIO(thumbnail)) as image:
+        assert image.format == "JPEG"
+        assert image.size == (480, 270)
+    assert len(thumbnail) < stat.st_size
+
+
+def test_accepts_gzip_honors_explicit_quality():
+    assert accepts_gzip("br, gzip") is True
+    assert accepts_gzip("*;q=0.5") is True
+    assert accepts_gzip("gzip;q=0, *;q=1") is False
+    assert accepts_gzip(None) is False
+
+
+def test_static_assets_are_compressed_and_conditionally_cached(dashboard_server):
+    base_url, _settings = dashboard_server
+
+    response = requests.get(
+        f"{base_url}/assets/app.js?v=test",
+        headers={"Accept-Encoding": "gzip"},
+        timeout=2,
+    )
+
+    assert response.status_code == 200
+    assert response.headers["Content-Encoding"] == "gzip"
+    assert "immutable" in response.headers["Cache-Control"]
+    assert response.headers["Server-Timing"].startswith("app;dur=")
+    etag = response.headers["ETag"]
+
+    cached = requests.get(
+        f"{base_url}/assets/app.js?v=test",
+        headers={"Accept-Encoding": "gzip", "If-None-Match": etag},
+        timeout=2,
+    )
+
+    assert cached.status_code == 304
+    assert cached.content == b""
+
+
+def test_thumbnail_route_serves_cached_preview(dashboard_server):
+    base_url, settings = dashboard_server
+    source = settings.output_dir / "motion-route.jpg"
+    source.write_bytes(jpeg_bytes((20, 80, 140)))
+
+    response = requests.get(
+        f"{base_url}/events/thumbnails/{source.name}",
+        timeout=2,
+    )
+
+    assert response.status_code == 200
+    assert response.headers["Content-Type"] == "image/jpeg"
+    assert "immutable" in response.headers["Cache-Control"]
+    assert len(response.content) < source.stat().st_size
+    with Image.open(io.BytesIO(response.content)) as image:
+        assert image.size == (480, 270)
 
 
 def test_event_history_filters_summarizes_and_paginates(tmp_path):
@@ -478,20 +589,75 @@ def test_dashboard_services_include_feed_recovery(monkeypatch, tmp_path):
         exposure_service="exposure.service",
     )
     observed = []
+
+    def read_states(names):
+        batch = tuple(names)
+        observed.append(batch)
+        return {name: {"name": name} for name in batch}
+
     monkeypatch.setattr(
-        "pi_camera_sentinel.dashboard.service_state",
-        lambda name: observed.append(name) or {"name": name},
+        "pi_camera_sentinel.dashboard.service_states",
+        read_states,
     )
 
-    services = DashboardApplication(settings).services()
+    app = DashboardApplication(settings)
+    services = app.services()
+    assert app.services() is services
 
     assert list(services) == ["motion", "recovery", "health", "watchdog"]
     assert observed == [
-        "motion.service",
-        "recovery.service",
-        "health.service",
-        "exposure.service",
+        (
+            "motion.service",
+            "recovery.service",
+            "health.service",
+            "exposure.service",
+        )
     ]
+
+
+def test_dashboard_reuses_archive_scan_until_directory_changes(monkeypatch, tmp_path):
+    first = tmp_path / "motion-first.jpg"
+    first.write_bytes(b"first")
+    os.utime(tmp_path, (100, 100))
+    scans = []
+
+    def scan(directory):
+        scans.append(directory)
+        return read_archive_files(directory)
+
+    monkeypatch.setattr("pi_camera_sentinel.dashboard.archive_files", scan)
+    app = DashboardApplication(dashboard_settings(tmp_path))
+
+    first_result = app.events(
+        window="all",
+        limit=12,
+        before=None,
+        period_start=None,
+        period_end=None,
+    )
+    second_result = app.events(
+        window="all",
+        limit=12,
+        before=None,
+        period_start=None,
+        period_end=None,
+    )
+    assert first_result["summary"]["retained_count"] == 1
+    assert second_result["summary"]["retained_count"] == 1
+    assert len(scans) == 1
+
+    (tmp_path / "motion-second.jpg").write_bytes(b"second")
+    os.utime(tmp_path, (200, 200))
+    changed = app.events(
+        window="all",
+        limit=12,
+        before=None,
+        period_start=None,
+        period_end=None,
+    )
+
+    assert changed["summary"]["retained_count"] == 2
+    assert len(scans) == 2
 
 
 def test_dashboard_manual_restart_returns_persisted_recovery_state(monkeypatch, tmp_path):

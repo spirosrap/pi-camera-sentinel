@@ -37,6 +37,7 @@ const elements = {
   eventGrid: document.querySelector("#event-grid"),
   eventPagination: document.querySelector("#event-pagination"),
   eventRangeControls: document.querySelector("#event-range-controls"),
+  eventsSection: document.querySelector("#events-section"),
   eventsEmpty: document.querySelector("#events-empty"),
   eventsLoadMore: document.querySelector("#events-load-more"),
   eventsMeta: document.querySelector("#events-meta"),
@@ -54,6 +55,7 @@ const elements = {
   healthLabel: document.querySelector("#health-label"),
   healthState: document.querySelector("#health-state"),
   localClock: document.querySelector("#local-clock"),
+  monitoringSection: document.querySelector("#monitoring-section"),
   maskAddButton: document.querySelector("#motion-mask-add"),
   maskApplyButton: document.querySelector("#motion-mask-apply"),
   maskCanvas: document.querySelector("#motion-mask-canvas"),
@@ -66,6 +68,7 @@ const elements = {
   maskRefreshButton: document.querySelector("#motion-mask-refresh"),
   maskRemoveButton: document.querySelector("#motion-mask-remove"),
   maskResetButton: document.querySelector("#motion-mask-reset"),
+  maskSection: document.querySelector("#motion-mask-section"),
   pauseButton: document.querySelector("#pause-button"),
   powerDetail: document.querySelector("#power-detail"),
   powerMetric: document.querySelector("#power-metric"),
@@ -92,6 +95,7 @@ const elements = {
   systemDetail: document.querySelector("#system-detail"),
   systemValue: document.querySelector("#system-value"),
   tuningForm: document.querySelector("#tuning-form"),
+  tuningSection: document.querySelector("#tuning-section"),
   warningBanner: document.querySelector("#warning-banner"),
   warningCopy: document.querySelector("#warning-copy"),
   webhookDetail: document.querySelector("#webhook-detail"),
@@ -121,6 +125,8 @@ const viewState = {
   maskRegions: [],
   maskSelected: -1,
   maskState: null,
+  masksInitialized: false,
+  monitoringInitialized: false,
   paused: false,
   policyBusy: false,
   policyDirty: false,
@@ -129,7 +135,9 @@ const viewState = {
   recoveryState: null,
   healthAlertState: null,
   serviceBusy: new Set(),
+  servicesBusy: false,
   serviceStates: {},
+  statusBusy: false,
   streamFeedOnline: null,
   streamHiddenAt: null,
   streamLoaded: false,
@@ -137,6 +145,8 @@ const viewState = {
   streamReconnectTimer: null,
   webhookBusy: false,
   webhookIntegration: null,
+  cameraInitialized: false,
+  eventsInitialized: false,
 };
 
 let eventRefreshRequest = null;
@@ -182,10 +192,40 @@ const relativeTime = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" })
 const activityTime = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
 const activityDay = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
 const activityWeekday = new Intl.DateTimeFormat(undefined, { weekday: "short" });
+const clockTime = new Intl.DateTimeFormat(undefined, { timeStyle: "medium" });
 const minimumDrawnMaskSize = 0.02;
 const streamReconnectBaseMs = 1000;
 const streamReconnectMaxMs = 30000;
 const streamVisibilityReconnectMs = 15000;
+const requestTimeoutMs = 10000;
+const deferredSectionMargin = "600px 0px";
+
+function scheduleIdle(callback, timeout = 1000) {
+  if ("requestIdleCallback" in window) {
+    window.requestIdleCallback(callback, { timeout });
+  } else {
+    window.setTimeout(callback, 0);
+  }
+}
+
+function runWhenNear(element, callback) {
+  let started = false;
+  const run = () => {
+    if (started) return;
+    started = true;
+    callback();
+  };
+  if (!("IntersectionObserver" in window)) {
+    scheduleIdle(run);
+    return;
+  }
+  const observer = new IntersectionObserver((entries) => {
+    if (!entries.some((entry) => entry.isIntersecting)) return;
+    observer.disconnect();
+    run();
+  }, { rootMargin: deferredSectionMargin });
+  observer.observe(element);
+}
 
 function formatBytes(bytes) {
   if (!Number.isFinite(bytes)) return "--";
@@ -611,10 +651,10 @@ async function sendWebhookTest() {
 }
 
 async function refreshStatus() {
+  if (viewState.statusBusy || document.hidden) return;
+  viewState.statusBusy = true;
   try {
-    const response = await fetch("/api/status", { cache: "no-store" });
-    if (!response.ok) throw new Error(`Status request failed: ${response.status}`);
-    renderStatus(await response.json());
+    renderStatus(await requestJSON("/api/status"));
   } catch (error) {
     setHealthState("offline");
     elements.frameStatus.textContent = error.message;
@@ -622,6 +662,8 @@ async function refreshStatus() {
     if (!viewState.streamLoaded) {
       scheduleStreamReconnect("Dashboard cannot reach the camera service");
     }
+  } finally {
+    viewState.statusBusy = false;
   }
 }
 
@@ -665,10 +707,13 @@ function renderServices(services) {
 }
 
 async function refreshServices() {
+  if (viewState.servicesBusy || document.hidden) return;
+  viewState.servicesBusy = true;
   try {
     const payload = await requestJSON("/api/services");
-    renderServices(payload.services || {});
+    if (viewState.serviceBusy.size === 0) renderServices(payload.services || {});
   } catch (error) {
+    if (viewState.serviceBusy.size > 0) return;
     elements.servicesMeta.textContent = error.message;
     Object.keys(serviceElements).forEach((serviceId) => {
       renderService(serviceId, {
@@ -678,6 +723,8 @@ async function refreshServices() {
         state: "unavailable",
       });
     });
+  } finally {
+    viewState.servicesBusy = false;
   }
 }
 
@@ -697,9 +744,9 @@ async function updateService(serviceId, active) {
     elements.servicesMeta.textContent = error.message;
   } finally {
     viewState.serviceBusy.delete(serviceId);
-    if (viewState.serviceStates[serviceId]) renderService(serviceId, viewState.serviceStates[serviceId]);
+    renderServices(viewState.serviceStates);
   }
-  await refreshServices();
+  window.setTimeout(refreshServices, 750);
 }
 
 function setPolicyBusy(busy) {
@@ -1165,15 +1212,30 @@ function renderCameraState(state, message = "Controls up to date") {
 }
 
 async function requestJSON(url, options = {}) {
-  const response = await fetch(url, { cache: "no-store", ...options });
-  let payload = {};
   try {
-    payload = await response.json();
-  } catch (_error) {
-    payload = {};
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), requestTimeoutMs);
+    try {
+      const response = await fetch(url, {
+        cache: "no-store",
+        ...options,
+        signal: controller.signal,
+      });
+      let payload = {};
+      try {
+        payload = await response.json();
+      } catch (_error) {
+        payload = {};
+      }
+      if (!response.ok) throw new Error(payload.error || `Request failed: ${response.status}`);
+      return payload;
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  } catch (error) {
+    if (error.name === "AbortError") throw new Error("Request timed out");
+    throw error;
   }
-  if (!response.ok) throw new Error(payload.error || `Request failed: ${response.status}`);
-  return payload;
 }
 
 async function refreshCameraState(message = "Controls up to date", force = false) {
@@ -1260,6 +1322,8 @@ function preloadAdjacentCaptures(index) {
     const event = viewState.events[candidate];
     if (!event) return;
     const image = new Image();
+    image.decoding = "async";
+    image.fetchPriority = "low";
     image.src = event.url;
   });
 }
@@ -1292,7 +1356,6 @@ function renderCaptureViewer() {
   elements.capturePrevious.disabled = viewState.captureLoadingOlder || index === 0;
   elements.captureNext.disabled = viewState.captureLoadingOlder
     || (index === viewState.events.length - 1 && viewState.eventCursor == null);
-  preloadAdjacentCaptures(index);
 }
 
 function openCapture(event) {
@@ -1337,12 +1400,22 @@ function createEventItem(event) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "event-item";
+  button.dataset.state = "loading";
   button.title = `Open capture from ${dateTime.format(new Date(event.captured_at))}`;
 
   const image = document.createElement("img");
-  image.src = event.url;
+  image.src = event.thumbnail_url || event.url;
   image.alt = `Motion capture from ${dateTime.format(new Date(event.captured_at))}`;
   image.loading = "lazy";
+  image.decoding = "async";
+  image.width = 480;
+  image.height = 270;
+  image.addEventListener("load", () => {
+    button.dataset.state = "ready";
+  });
+  image.addEventListener("error", () => {
+    button.dataset.state = "error";
+  });
 
   const caption = document.createElement("span");
   const label = document.createElement("strong");
@@ -1357,6 +1430,8 @@ function createEventItem(event) {
 
 function setEventsBusy(busy) {
   viewState.eventsBusy = busy;
+  elements.eventGrid.setAttribute("aria-busy", String(busy));
+  elements.eventsSection.dataset.state = busy ? "loading" : "ready";
   eventRangeButtons.forEach((button) => {
     button.disabled = busy;
   });
@@ -1440,8 +1515,6 @@ function selectionMatchesBucket(bucket) {
 function beginActivityFilter(message) {
   if (elements.captureDialog.open) elements.captureDialog.close();
   viewState.eventCursor = null;
-  viewState.events = [];
-  elements.eventGrid.replaceChildren();
   elements.eventsEmpty.hidden = true;
   elements.eventPagination.hidden = true;
   elements.eventsMeta.textContent = message;
@@ -1539,8 +1612,12 @@ function renderEventActivity() {
     : "Now";
 }
 
-function renderEvents() {
-  elements.eventGrid.replaceChildren(...viewState.events.map(createEventItem));
+function renderEvents({ append = false, pageEvents = [], preserveItems = false } = {}) {
+  if (append) {
+    elements.eventGrid.append(...pageEvents.map(createEventItem));
+  } else if (!preserveItems) {
+    elements.eventGrid.replaceChildren(...viewState.events.map(createEventItem));
+  }
   elements.eventsEmpty.hidden = viewState.events.length > 0;
   elements.eventsEmpty.textContent = viewState.eventSelection
     ? "No motion captures in this period."
@@ -1561,12 +1638,16 @@ async function performEventRefresh({ append = false } = {}) {
       query.set("period_end", String(new Date(viewState.eventSelection.ended_at).getTime() / 1000));
     }
     const payload = await requestJSON(`/api/events?${query}`);
-    viewState.events = append ? [...viewState.events, ...payload.events] : payload.events;
+    const pageEvents = payload.events;
+    const preserveItems = !append
+      && viewState.events.length === pageEvents.length
+      && viewState.events.every((event, index) => event.name === pageEvents[index].name);
+    viewState.events = append ? [...viewState.events, ...pageEvents] : pageEvents;
     viewState.eventCursor = payload.next_before;
     viewState.eventSummary = payload.summary;
     viewState.eventActivity = payload.activity;
     viewState.eventSelection = payload.selection;
-    renderEvents();
+    renderEvents({ append, pageEvents, preserveItems });
     return true;
   } catch (error) {
     if (!append) {
@@ -1607,25 +1688,46 @@ function selectEventWindow(windowName) {
   if (elements.captureDialog.open) elements.captureDialog.close();
   viewState.eventWindow = windowName;
   viewState.eventCursor = null;
-  viewState.eventActivity = null;
   viewState.eventSelection = null;
-  viewState.eventSummary = null;
-  viewState.events = [];
   eventRangeButtons.forEach((button) => {
     button.setAttribute("aria-pressed", String(button.dataset.eventWindow === windowName));
   });
-  elements.eventGrid.replaceChildren();
   elements.eventsEmpty.hidden = true;
   elements.eventPagination.hidden = true;
   elements.eventsMeta.textContent = "Loading selected range";
-  renderEventActivity();
   refreshEvents();
 }
 
 function updateClock() {
   const now = new Date();
   elements.localClock.dateTime = now.toISOString();
-  elements.localClock.textContent = new Intl.DateTimeFormat(undefined, { timeStyle: "medium" }).format(now);
+  elements.localClock.textContent = clockTime.format(now);
+}
+
+function initializeMonitoring() {
+  if (viewState.monitoringInitialized) return;
+  viewState.monitoringInitialized = true;
+  refreshServices();
+  refreshPolicy();
+}
+
+function initializeMotionMasks() {
+  if (viewState.masksInitialized) return;
+  viewState.masksInitialized = true;
+  refreshMotionMasks();
+  refreshMotionMaskFrame();
+}
+
+function initializeCameraTuning() {
+  if (viewState.cameraInitialized) return;
+  viewState.cameraInitialized = true;
+  refreshCameraState();
+}
+
+function initializeEvents() {
+  if (viewState.eventsInitialized) return;
+  viewState.eventsInitialized = true;
+  refreshEvents();
 }
 
 elements.maskPreview.addEventListener("load", () => {
@@ -1689,6 +1791,15 @@ elements.dialogClose.addEventListener("click", () => elements.captureDialog.clos
 elements.captureImage.addEventListener("load", () => {
   elements.captureStage.dataset.state = "ready";
   elements.captureImageStatus.hidden = true;
+  const loadedName = elements.captureImage.dataset.captureName;
+  scheduleIdle(() => {
+    if (
+      elements.captureDialog.open
+      && elements.captureImage.dataset.captureName === loadedName
+    ) {
+      preloadAdjacentCaptures(captureIndex());
+    }
+  }, 500);
 });
 elements.captureImage.addEventListener("error", () => {
   elements.captureStage.dataset.state = "error";
@@ -1728,6 +1839,17 @@ document.addEventListener("visibilitychange", () => {
   if (!viewState.paused && (hiddenFor >= streamVisibilityReconnectMs || !viewState.streamLoaded)) {
     startStream({ message: "Refreshing live view" });
   }
+  refreshStatus();
+  updateClock();
+  scheduleIdle(() => {
+    if (viewState.monitoringInitialized) {
+      refreshServices();
+      refreshPolicy();
+    }
+    if (viewState.masksInitialized) refreshMotionMasks();
+    if (viewState.eventsInitialized && viewState.events.length <= 12) refreshEvents();
+    if (viewState.cameraInitialized) refreshCameraState();
+  }, 500);
 });
 window.addEventListener("offline", () => {
   clearStreamReconnect();
@@ -1738,6 +1860,11 @@ window.addEventListener("offline", () => {
 });
 window.addEventListener("online", () => {
   if (!viewState.paused) scheduleStreamReconnect("Network restored", { immediate: true });
+  refreshStatus();
+  scheduleIdle(() => {
+    if (viewState.monitoringInitialized) refreshServices();
+    if (viewState.eventsInitialized && viewState.events.length <= 12) refreshEvents();
+  }, 500);
 });
 if ("ResizeObserver" in window) {
   new ResizeObserver(drawMotionMasks).observe(elements.maskPreviewShell);
@@ -1747,19 +1874,29 @@ if ("ResizeObserver" in window) {
 
 startStream();
 refreshStatus();
-refreshServices();
-refreshPolicy();
-refreshMotionMasks();
-refreshMotionMaskFrame();
-refreshEvents();
-refreshCameraState();
+runWhenNear(elements.monitoringSection, initializeMonitoring);
+runWhenNear(elements.maskSection, initializeMotionMasks);
+runWhenNear(elements.tuningSection, initializeCameraTuning);
+runWhenNear(elements.eventsSection, initializeEvents);
 updateClock();
-setInterval(refreshStatus, 10000);
-setInterval(refreshServices, 10000);
-setInterval(refreshPolicy, 30000);
-setInterval(refreshMotionMasks, 30000);
 setInterval(() => {
-  if (viewState.events.length <= 12) refreshEvents();
+  if (!document.hidden) refreshStatus();
+}, 10000);
+setInterval(() => {
+  if (!document.hidden && viewState.monitoringInitialized) refreshServices();
+}, 10000);
+setInterval(() => {
+  if (!document.hidden && viewState.monitoringInitialized) refreshPolicy();
 }, 30000);
-setInterval(refreshCameraState, 60000);
-setInterval(updateClock, 1000);
+setInterval(() => {
+  if (!document.hidden && viewState.masksInitialized) refreshMotionMasks();
+}, 30000);
+setInterval(() => {
+  if (!document.hidden && viewState.eventsInitialized && viewState.events.length <= 12) refreshEvents();
+}, 30000);
+setInterval(() => {
+  if (!document.hidden && viewState.cameraInitialized) refreshCameraState();
+}, 60000);
+setInterval(() => {
+  if (!document.hidden) updateClock();
+}, 1000);
