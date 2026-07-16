@@ -305,6 +305,47 @@ def test_event_activity_places_boundaries_and_adapts_all_range(tmp_path):
     assert sum(bucket["count"] for bucket in complete["buckets"]) == 4
 
 
+def test_event_history_filters_and_paginates_selected_period(tmp_path):
+    now = 2_000_000.0
+    timestamps = [now - 10, now - 20, now - 30, now - 100]
+    for index, timestamp in enumerate(timestamps):
+        path = tmp_path / f"motion-period-{index}.jpg"
+        path.write_bytes(b"x" * (index + 1))
+        os.utime(path, (timestamp, timestamp))
+
+    first_page = event_history(
+        tmp_path,
+        window="24h",
+        limit=1,
+        period_start=now - 30,
+        period_end=now - 10,
+        now=now,
+    )
+
+    assert [event["name"] for event in first_page["events"]] == ["motion-period-1.jpg"]
+    assert first_page["selection"] == {
+        "started_at": "1970-01-24T03:32:50+00:00",
+        "ended_at": "1970-01-24T03:33:10+00:00",
+        "count": 2,
+        "size_bytes": 5,
+    }
+    assert first_page["next_before"] == timestamps[1]
+    assert first_page["summary"]["window_count"] == 4
+    assert sum(bucket["count"] for bucket in first_page["activity"]["buckets"]) == 4
+
+    second_page = event_history(
+        tmp_path,
+        window="24h",
+        limit=1,
+        before=first_page["next_before"],
+        period_start=now - 30,
+        period_end=now - 10,
+        now=now,
+    )
+    assert [event["name"] for event in second_page["events"]] == ["motion-period-2.jpg"]
+    assert second_page["next_before"] is None
+
+
 def test_empty_event_activity_uses_stable_single_all_bucket(tmp_path):
     activity = event_history(tmp_path, window="all", now=10_000_000.0)["activity"]
 
@@ -341,8 +382,10 @@ def test_event_history_reports_archive_retention_state(tmp_path):
 
 
 def test_parse_event_query_validates_range_limit_and_cursor():
-    assert parse_event_query("") == ("24h", 12, None)
-    assert parse_event_query("window=all&limit=24&before=123.5") == ("all", 24, 123.5)
+    assert parse_event_query("") == ("24h", 12, None, None, None)
+    assert parse_event_query(
+        "window=all&limit=24&before=123.5&period_start=100&period_end=200"
+    ) == ("all", 24, 123.5, 100.0, 200.0)
     with pytest.raises(ValueError, match="window must be one of"):
         parse_event_query("window=month")
     with pytest.raises(ValueError, match="limit must be between"):
@@ -351,6 +394,14 @@ def test_parse_event_query_validates_range_limit_and_cursor():
         parse_event_query("before=yesterday")
     with pytest.raises(ValueError, match="before must be a positive timestamp"):
         parse_event_query("before=nan")
+    with pytest.raises(ValueError, match="provided together"):
+        parse_event_query("period_start=100")
+    with pytest.raises(ValueError, match="period boundaries must be timestamps"):
+        parse_event_query("period_start=yesterday&period_end=200")
+    with pytest.raises(ValueError, match="period boundaries must be positive timestamps"):
+        parse_event_query("period_start=100&period_end=nan")
+    with pytest.raises(ValueError, match="period_start must be earlier"):
+        parse_event_query("period_start=200&period_end=100")
 
 
 def test_with_query_preserves_existing_upstream_query():

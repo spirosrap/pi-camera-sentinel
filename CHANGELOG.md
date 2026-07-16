@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.8.0 - 2026-07-16
+
+- Turn non-empty activity bars into keyboard-accessible archive filters.
+- Query the exact selected hour, day, or adaptive all-time period on the server.
+- Keep the full-range trend visible while highlighting the active period.
+- Preserve capture pagination inside a selected period.
+- Show selected-period counts alongside full-range and retained totals.
+- Add a clear action that restores the complete range without changing range tabs.
+- Validate paired, finite, positive, and ordered period boundaries at the API edge.
+
 ## 1.7.0 - 2026-07-16
 
 - Add motion activity insights for the 24-hour, 7-day, and all-time archive ranges.

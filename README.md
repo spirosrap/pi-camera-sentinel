@@ -9,6 +9,7 @@ This project is intentionally small: no cloud camera account, no public port for
 - Streams a USB webcam from a Raspberry Pi over HTTP.
 - Presents a private, responsive dashboard with live status and filterable motion history.
 - Summarizes motion activity with range-aware trends and peak periods.
+- Drills from activity periods into their exact retained captures.
 - Optionally exposes the feed privately through Tailscale Serve.
 - Watches snapshots for motion using frame differencing.
 - Supports dashboard-drawn ignored areas for excluding noisy motion zones.
@@ -148,11 +149,12 @@ The `pi-camera-sentinel serve` command provides a small same-origin web app on p
 - camera profiles plus safe manual exposure, color, gain, sharpness, and white-balance controls
 - retained motion snapshots with 24-hour, 7-day, and all-time filters
 - motion activity totals, active periods, peak period, and rolling trend chart
+- selectable activity periods with exact server-backed event filtering
 - archive totals and paginated access to older captures
 - active archive limits and pending cleanup status
 - `/healthz`, `/api/status`, `/api/camera`, `/api/policy`, `/api/masks`, `/api/recovery/restart`, and `/api/webhook/test` endpoints for monitoring and control
 
-The event API at `/api/events` accepts a validated `window` (`24h`, `7d`, or `all`), a page `limit`, and an optional `before` cursor. Responses include retained-file counts, storage totals, archive-retention state, and reconciled activity buckets as well as the current page. See [docs/activity-insights.md](docs/activity-insights.md).
+The event API at `/api/events` accepts a validated `window` (`24h`, `7d`, or `all`), a page `limit`, an optional `before` cursor, and paired `period_start` / `period_end` timestamps for activity drill-down. Responses include retained-file counts, storage totals, archive-retention state, reconciled activity buckets, and selected-period metadata as well as the current page. See [docs/activity-insights.md](docs/activity-insights.md).
 
 The server proxies `/stream` and `/snapshot` to `ustreamer`, which keeps the raw camera port private when Tailscale Serve points at the dashboard.
 

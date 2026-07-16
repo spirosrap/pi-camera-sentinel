@@ -331,6 +331,8 @@ def event_history(
     window: str = "24h",
     limit: int = 12,
     before: float | None = None,
+    period_start: float | None = None,
+    period_end: float | None = None,
     now: float | None = None,
     retention_policy: RetentionPolicy | None = None,
 ) -> dict[str, object]:
@@ -340,13 +342,39 @@ def event_history(
         raise ValueError(f"limit must be between 1 and {MAX_EVENT_PAGE_SIZE}")
     if before is not None and (not math.isfinite(before) or before <= 0):
         raise ValueError("before must be a positive timestamp")
+    if (period_start is None) != (period_end is None):
+        raise ValueError("period_start and period_end must be provided together")
+    if period_start is not None and period_end is not None:
+        if (
+            not math.isfinite(period_start)
+            or not math.isfinite(period_end)
+            or period_start <= 0
+            or period_end <= 0
+        ):
+            raise ValueError("period boundaries must be positive timestamps")
+        if period_start >= period_end:
+            raise ValueError("period_start must be earlier than period_end")
 
     records = motion_event_records(directory)
     current_time = time.time() if now is None else now
     window_seconds = EVENT_WINDOWS[window]
     cutoff = current_time - window_seconds if window_seconds is not None else None
     window_records = [record for record in records if cutoff is None or record[1] >= cutoff]
-    candidates = [record for record in window_records if before is None or record[1] < before]
+    selected_records = window_records
+    selection = None
+    if period_start is not None and period_end is not None:
+        selected_records = [
+            record
+            for record in window_records
+            if period_start <= record[1] < period_end
+        ]
+        selection = {
+            "started_at": dt.datetime.fromtimestamp(period_start, dt.timezone.utc).isoformat(),
+            "ended_at": dt.datetime.fromtimestamp(period_end, dt.timezone.utc).isoformat(),
+            "count": len(selected_records),
+            "size_bytes": sum(record[2] for record in selected_records),
+        }
+    candidates = [record for record in selected_records if before is None or record[1] < before]
     page = candidates[:limit]
     has_more = len(candidates) > limit
     events = [
@@ -382,6 +410,7 @@ def event_history(
         "window": window,
         "summary": summary,
         "activity": event_activity(window_records, window=window, now=current_time),
+        "selection": selection,
         "next_before": page[-1][1] if has_more and page else None,
     }
 
@@ -392,7 +421,9 @@ def list_recent_events(directory: Path, limit: int = 12) -> list[dict[str, objec
     return event_history(directory, window="all", limit=limit)["events"]  # type: ignore[return-value]
 
 
-def parse_event_query(query: str) -> tuple[str, int, float | None]:
+def parse_event_query(
+    query: str,
+) -> tuple[str, int, float | None, float | None, float | None]:
     parameters = parse_qs(query, keep_blank_values=True)
     window = parameters.get("window", ["24h"])[0]
     try:
@@ -404,13 +435,32 @@ def parse_event_query(query: str) -> tuple[str, int, float | None]:
         before = float(before_text) if before_text else None
     except ValueError as exc:
         raise ValueError("before must be a timestamp") from exc
+    period_start_text = parameters.get("period_start", [""])[0]
+    period_end_text = parameters.get("period_end", [""])[0]
+    try:
+        period_start = float(period_start_text) if period_start_text else None
+        period_end = float(period_end_text) if period_end_text else None
+    except ValueError as exc:
+        raise ValueError("period boundaries must be timestamps") from exc
     if window not in EVENT_WINDOWS:
         raise ValueError("window must be one of: 24h, 7d, all")
     if limit < 1 or limit > MAX_EVENT_PAGE_SIZE:
         raise ValueError(f"limit must be between 1 and {MAX_EVENT_PAGE_SIZE}")
     if before is not None and (not math.isfinite(before) or before <= 0):
         raise ValueError("before must be a positive timestamp")
-    return window, limit, before
+    if (period_start is None) != (period_end is None):
+        raise ValueError("period_start and period_end must be provided together")
+    if period_start is not None and period_end is not None:
+        if (
+            not math.isfinite(period_start)
+            or not math.isfinite(period_end)
+            or period_start <= 0
+            or period_end <= 0
+        ):
+            raise ValueError("period boundaries must be positive timestamps")
+        if period_start >= period_end:
+            raise ValueError("period_start must be earlier than period_end")
+    return window, limit, before, period_start, period_end
 
 
 def with_query(url: str, query: str) -> str:
@@ -465,12 +515,16 @@ class DashboardApplication:
         window: str,
         limit: int,
         before: float | None,
+        period_start: float | None,
+        period_end: float | None,
     ) -> dict[str, object]:
         return event_history(
             self.settings.output_dir,
             window=window,
             limit=limit,
             before=before,
+            period_start=period_start,
+            period_end=period_end,
             retention_policy=policy_from_settings(self.settings),
         )
 
@@ -643,8 +697,16 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             self.send_json(self.app.status())
         elif path == "/api/events":
             try:
-                window, limit, before = parse_event_query(parsed.query)
-                self.send_json(self.app.events(window=window, limit=limit, before=before))
+                window, limit, before, period_start, period_end = parse_event_query(parsed.query)
+                self.send_json(
+                    self.app.events(
+                        window=window,
+                        limit=limit,
+                        before=before,
+                        period_start=period_start,
+                        period_end=period_end,
+                    )
+                )
             except ValueError as exc:
                 self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
         elif path == "/api/camera":

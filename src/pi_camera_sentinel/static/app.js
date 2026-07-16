@@ -7,6 +7,7 @@ const elements = {
   activityAxisStart: document.querySelector("#activity-axis-start"),
   activityBand: document.querySelector("#activity-band"),
   activityChart: document.querySelector("#activity-chart"),
+  activityClear: document.querySelector("#activity-clear"),
   activityLast: document.querySelector("#activity-last"),
   activityPeak: document.querySelector("#activity-peak"),
   activityRange: document.querySelector("#activity-range"),
@@ -98,6 +99,7 @@ const viewState = {
   dirtyControls: new Set(),
   eventCursor: null,
   eventActivity: null,
+  eventSelection: null,
   eventSummary: null,
   eventWindow: "24h",
   events: [],
@@ -1262,6 +1264,10 @@ function setEventsBusy(busy) {
   });
   elements.eventsLoadMore.disabled = busy;
   elements.eventsLoadMore.textContent = busy ? "Loading captures" : "Load older captures";
+  elements.activityClear.disabled = busy;
+  elements.activityChart.querySelectorAll(".activity-bar").forEach((bar) => {
+    bar.disabled = busy || bar.dataset.count === "0";
+  });
 }
 
 function renderEventSummary() {
@@ -1269,7 +1275,14 @@ function renderEventSummary() {
   if (!summary) return;
   const shown = viewState.events.length;
   const storage = formatBytes(summary.retained_size_bytes);
-  if (viewState.eventWindow === "all") {
+  const selection = viewState.eventSelection;
+  if (selection) {
+    const period = activityPeriodLabel(selection);
+    const range = viewState.eventWindow === "all"
+      ? `${summary.retained_count} retained`
+      : `${summary.window_count} in ${viewState.eventWindow === "24h" ? "24 hours" : "7 days"}`;
+    elements.eventsMeta.textContent = `${shown} shown / ${selection.count} in ${period} / ${range} / ${storage}`;
+  } else if (viewState.eventWindow === "all") {
     elements.eventsMeta.textContent = `${shown} shown / ${summary.retained_count} retained / ${storage}`;
   } else {
     const label = viewState.eventWindow === "24h" ? "24 hours" : "7 days";
@@ -1301,8 +1314,66 @@ function activityTick(isoDate) {
   return activityDay.format(date);
 }
 
+function activityPeriodLabel(period) {
+  const start = new Date(period.started_at);
+  const end = new Date(period.ended_at);
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) return "selected period";
+  if (viewState.eventWindow === "24h") {
+    return `${activityTime.format(start)} - ${activityTime.format(end)}`;
+  }
+  if (viewState.eventWindow === "7d") {
+    return `${activityWeekday.format(start)} ${activityTime.format(start)} - ${activityWeekday.format(end)} ${activityTime.format(end)}`;
+  }
+  return `${activityDay.format(start)} - ${activityDay.format(end)}`;
+}
+
+function selectionMatchesBucket(bucket) {
+  const selection = viewState.eventSelection;
+  if (!selection) return false;
+  const selectionStart = new Date(selection.started_at).getTime();
+  const selectionEnd = new Date(selection.ended_at).getTime();
+  const bucketStart = new Date(bucket.started_at).getTime();
+  const bucketEnd = new Date(bucket.ended_at).getTime();
+  if (![selectionStart, selectionEnd, bucketStart, bucketEnd].every(Number.isFinite)) return false;
+  const midpoint = selectionStart + ((selectionEnd - selectionStart) / 2);
+  return bucketStart <= midpoint && midpoint < bucketEnd;
+}
+
+function beginActivityFilter(message) {
+  viewState.eventCursor = null;
+  viewState.events = [];
+  elements.eventGrid.replaceChildren();
+  elements.eventsEmpty.hidden = true;
+  elements.eventPagination.hidden = true;
+  elements.eventsMeta.textContent = message;
+  renderEventActivity();
+  refreshEvents();
+}
+
+function selectActivityPeriod(bucket) {
+  if (viewState.eventsBusy || Number(bucket.count || 0) <= 0) return;
+  if (selectionMatchesBucket(bucket)) {
+    clearActivityPeriod();
+    return;
+  }
+  viewState.eventSelection = {
+    started_at: bucket.started_at,
+    ended_at: bucket.ended_at,
+    count: Number(bucket.count || 0),
+    size_bytes: Number(bucket.size_bytes || 0),
+  };
+  beginActivityFilter(`Loading ${activityPeriodLabel(viewState.eventSelection)}`);
+}
+
+function clearActivityPeriod() {
+  if (viewState.eventsBusy || !viewState.eventSelection) return;
+  viewState.eventSelection = null;
+  beginActivityFilter("Loading full range");
+}
+
 function renderEventActivity() {
   const activity = viewState.eventActivity;
+  elements.activityClear.hidden = !viewState.eventSelection;
   if (!activity || !Array.isArray(activity.buckets)) {
     elements.activityBand.dataset.state = "unavailable";
     elements.activityRange.textContent = "Activity unavailable";
@@ -1340,12 +1411,20 @@ function renderEventActivity() {
   const bars = buckets.map((bucket) => {
     const count = Number(bucket.count || 0);
     const level = peak > 0 && count > 0 ? Math.max(1, Math.ceil((count / peak) * 10)) : 0;
-    const bar = document.createElement("span");
+    const selected = selectionMatchesBucket(bucket);
+    const period = activityPeriodLabel(bucket);
+    const bar = document.createElement("button");
+    bar.type = "button";
     bar.className = "activity-bar";
+    bar.dataset.count = String(count);
     bar.dataset.level = String(level);
     bar.dataset.peak = String(peak > 0 && count === peak);
-    bar.title = `${count} ${count === 1 ? "capture" : "captures"} / ${dateTime.format(new Date(bucket.started_at))}`;
-    bar.setAttribute("aria-hidden", "true");
+    bar.dataset.selected = String(selected);
+    bar.disabled = viewState.eventsBusy || count === 0;
+    bar.title = `${count} ${count === 1 ? "capture" : "captures"} / ${period}`;
+    bar.setAttribute("aria-label", `${count} ${count === 1 ? "capture" : "captures"}, ${period}`);
+    bar.setAttribute("aria-pressed", String(selected));
+    bar.addEventListener("click", () => selectActivityPeriod(bucket));
     return bar;
   });
   elements.activityChart.replaceChildren(...bars);
@@ -1364,7 +1443,9 @@ function renderEventActivity() {
 function renderEvents() {
   elements.eventGrid.replaceChildren(...viewState.events.map(createEventItem));
   elements.eventsEmpty.hidden = viewState.events.length > 0;
-  elements.eventsEmpty.textContent = "No motion captures in this range.";
+  elements.eventsEmpty.textContent = viewState.eventSelection
+    ? "No motion captures in this period."
+    : "No motion captures in this range.";
   elements.eventPagination.hidden = viewState.eventCursor == null;
   renderEventActivity();
   renderEventSummary();
@@ -1376,11 +1457,16 @@ async function refreshEvents({ append = false } = {}) {
   try {
     const query = new URLSearchParams({ window: viewState.eventWindow, limit: "12" });
     if (append && viewState.eventCursor != null) query.set("before", String(viewState.eventCursor));
+    if (viewState.eventSelection) {
+      query.set("period_start", String(new Date(viewState.eventSelection.started_at).getTime() / 1000));
+      query.set("period_end", String(new Date(viewState.eventSelection.ended_at).getTime() / 1000));
+    }
     const payload = await requestJSON(`/api/events?${query}`);
     viewState.events = append ? [...viewState.events, ...payload.events] : payload.events;
     viewState.eventCursor = payload.next_before;
     viewState.eventSummary = payload.summary;
     viewState.eventActivity = payload.activity;
+    viewState.eventSelection = payload.selection;
     renderEvents();
   } catch (error) {
     if (!append) {
@@ -1406,10 +1492,16 @@ function selectEventWindow(windowName) {
   viewState.eventWindow = windowName;
   viewState.eventCursor = null;
   viewState.eventActivity = null;
+  viewState.eventSelection = null;
+  viewState.eventSummary = null;
   viewState.events = [];
   eventRangeButtons.forEach((button) => {
     button.setAttribute("aria-pressed", String(button.dataset.eventWindow === windowName));
   });
+  elements.eventGrid.replaceChildren();
+  elements.eventsEmpty.hidden = true;
+  elements.eventPagination.hidden = true;
+  elements.eventsMeta.textContent = "Loading selected range";
   renderEventActivity();
   refreshEvents();
 }
@@ -1457,6 +1549,7 @@ elements.recoveryRestartButton.addEventListener("click", restartFeed);
 eventRangeButtons.forEach((button) => {
   button.addEventListener("click", () => selectEventWindow(button.dataset.eventWindow));
 });
+elements.activityClear.addEventListener("click", clearActivityPeriod);
 elements.eventsLoadMore.addEventListener("click", () => refreshEvents({ append: true }));
 Object.entries(serviceElements).forEach(([serviceId, target]) => {
   target.toggle.addEventListener("change", () => updateService(serviceId, target.toggle.checked));

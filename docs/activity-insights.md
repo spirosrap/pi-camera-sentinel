@@ -9,7 +9,13 @@ Pi Camera Sentinel summarizes the retained motion archive above Event history. T
 - **Peak period** shows the busiest bucket and its start time.
 - **Last activity** shows the newest retained capture in the selected range.
 
-The chart is relative within the selected range: the tallest bar is the busiest period, and other bars scale against it. Hovering a bar shows its capture count and start time. The chart also exposes an accessible text summary.
+The chart is relative within the selected range: the tallest bar is the busiest period, and other bars scale against it. Each non-empty bar is an accessible button labeled with its capture count and local-time period.
+
+## Period Drill-Down
+
+Selecting a non-empty chart bar filters Event history to captures whose timestamps fall inside that exact period. The full-range chart remains visible, the active period is highlighted, and pagination continues within the selected period. **Clear period** restores the complete 24-hour, 7-day, or all-time range without changing the active range tab.
+
+The selected start boundary is inclusive and the end boundary is exclusive. This keeps a capture on a shared boundary in exactly one period.
 
 ## Bucket Ranges
 
@@ -21,7 +27,7 @@ The server computes bucket boundaries in UTC. The dashboard formats labels in th
 
 ## API
 
-`GET /api/events` includes an `activity` object alongside `events`, `summary`, and `next_before`:
+`GET /api/events` includes an `activity` object alongside `events`, `summary`, `selection`, and `next_before`:
 
 ```json
 {
@@ -37,5 +43,20 @@ The server computes bucket boundaries in UTC. The dashboard formats labels in th
 ```
 
 Each bucket contains `started_at`, `ended_at`, `count`, and `size_bytes`. Bucket counts always sum to `summary.window_count`. Pagination changes only the returned capture page; activity continues to summarize the complete selected range.
+
+Pass both `period_start` and `period_end` as Unix timestamps to filter the capture page. The API rejects missing pairs, non-finite or non-positive timestamps, and periods whose start is not earlier than their end. A filtered response includes:
+
+```json
+{
+  "selection": {
+    "started_at": "2026-07-16T06:00:00+00:00",
+    "ended_at": "2026-07-16T07:00:00+00:00",
+    "count": 12,
+    "size_bytes": 3821421
+  }
+}
+```
+
+The period intersects the selected top-level `window`; it cannot expose captures outside that range. `before` continues to paginate only the filtered records.
 
 Activity is derived directly from retained file timestamps during the existing archive scan. It does not decode images, issue extra browser requests, or maintain a second database. Archive retention therefore remains the single source of truth.
