@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.9.0 - 2026-07-16
+
+- Replace the basic capture popup with a responsive archive review viewer.
+- Navigate newer and older captures with arrow controls or keyboard arrow keys.
+- Load the next archive page automatically when review reaches the loaded boundary.
+- Queue boundary paging behind any background archive refresh so navigation never drops a click.
+- Preserve active range and activity-period filters while paging in the viewer.
+- Show exact capture position, local timestamp, and file size.
+- Add an original-file download action without creating a second copy on the Pi.
+- Preload adjacent captures and expose clear loading and unavailable-image states.
+
 ## 1.8.0 - 2026-07-16
 
 - Turn non-empty activity bars into keyboard-accessible archive filters.

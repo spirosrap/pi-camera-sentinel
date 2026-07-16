@@ -24,7 +24,14 @@ const elements = {
   cameraRefreshButton: document.querySelector("#camera-refresh-button"),
   cameraSource: document.querySelector("#camera-source"),
   captureDialog: document.querySelector("#capture-dialog"),
+  captureDownload: document.querySelector("#capture-download"),
   captureImage: document.querySelector("#capture-image"),
+  captureImageStatus: document.querySelector("#capture-image-status"),
+  captureNext: document.querySelector("#capture-next"),
+  capturePosition: document.querySelector("#capture-position"),
+  capturePrevious: document.querySelector("#capture-previous"),
+  captureSize: document.querySelector("#capture-size"),
+  captureStage: document.querySelector("#capture-stage"),
   captureTime: document.querySelector("#capture-time"),
   dialogClose: document.querySelector("#dialog-close"),
   eventGrid: document.querySelector("#event-grid"),
@@ -96,6 +103,8 @@ const elements = {
 const viewState = {
   cameraBusy: false,
   cameraState: null,
+  captureLoadingOlder: false,
+  captureName: null,
   dirtyControls: new Set(),
   eventCursor: null,
   eventActivity: null,
@@ -129,6 +138,8 @@ const viewState = {
   webhookBusy: false,
   webhookIntegration: null,
 };
+
+let eventRefreshRequest = null;
 
 const serviceElements = {
   motion: {
@@ -1228,11 +1239,98 @@ async function applyManualControls(event) {
   }
 }
 
-function openCapture(event) {
-  elements.captureImage.src = event.url;
+function captureIndex() {
+  return viewState.events.findIndex((event) => event.name === viewState.captureName);
+}
+
+function captureTotal() {
+  let total = viewState.events.length;
+  if (viewState.eventSelection) {
+    total = Number(viewState.eventSelection.count);
+  } else if (viewState.eventSummary) {
+    total = viewState.eventWindow === "all"
+      ? Number(viewState.eventSummary.retained_count)
+      : Number(viewState.eventSummary.window_count);
+  }
+  return Number.isFinite(total) && total > 0 ? total : viewState.events.length;
+}
+
+function preloadAdjacentCaptures(index) {
+  [index - 1, index + 1].forEach((candidate) => {
+    const event = viewState.events[candidate];
+    if (!event) return;
+    const image = new Image();
+    image.src = event.url;
+  });
+}
+
+function renderCaptureViewer() {
+  if (!viewState.captureName) return;
+  const index = captureIndex();
+  if (index < 0) {
+    if (elements.captureDialog.open) elements.captureDialog.close();
+    return;
+  }
+
+  const event = viewState.events[index];
+  if (elements.captureImage.dataset.captureName !== event.name) {
+    elements.captureStage.dataset.state = "loading";
+    elements.captureImageStatus.textContent = "Loading capture";
+    elements.captureImageStatus.hidden = false;
+    elements.captureImage.dataset.captureName = event.name;
+    elements.captureImage.src = event.url;
+  }
+  elements.captureImage.alt = `Motion capture from ${dateTime.format(new Date(event.captured_at))}`;
+  elements.captureDownload.href = event.url;
+  elements.captureDownload.download = event.name;
   elements.captureTime.dateTime = event.captured_at;
   elements.captureTime.textContent = dateTime.format(new Date(event.captured_at));
-  elements.captureDialog.showModal();
+  elements.captureSize.textContent = formatBytes(event.size_bytes);
+  elements.capturePosition.textContent = viewState.captureLoadingOlder
+    ? "Loading older captures"
+    : `${index + 1} of ${captureTotal()}`;
+  elements.capturePrevious.disabled = viewState.captureLoadingOlder || index === 0;
+  elements.captureNext.disabled = viewState.captureLoadingOlder
+    || (index === viewState.events.length - 1 && viewState.eventCursor == null);
+  preloadAdjacentCaptures(index);
+}
+
+function openCapture(event) {
+  viewState.captureName = event.name;
+  if (!elements.captureDialog.open) elements.captureDialog.showModal();
+  renderCaptureViewer();
+}
+
+async function moveCapture(direction) {
+  if (!elements.captureDialog.open || viewState.captureLoadingOlder) return;
+  const index = captureIndex();
+  const target = index + direction;
+  if (target >= 0 && target < viewState.events.length) {
+    viewState.captureName = viewState.events[target].name;
+    renderCaptureViewer();
+    return;
+  }
+  if (direction < 0 || viewState.eventCursor == null) return;
+
+  const currentName = viewState.captureName;
+  viewState.captureLoadingOlder = true;
+  renderCaptureViewer();
+  const loaded = await refreshEvents({ append: true });
+  viewState.captureLoadingOlder = false;
+  const currentIndex = viewState.events.findIndex((event) => event.name === currentName);
+  if (loaded && currentIndex >= 0 && currentIndex + 1 < viewState.events.length) {
+    viewState.captureName = viewState.events[currentIndex + 1].name;
+  }
+  renderCaptureViewer();
+}
+
+function resetCaptureViewer() {
+  viewState.captureLoadingOlder = false;
+  viewState.captureName = null;
+  elements.captureImage.removeAttribute("src");
+  delete elements.captureImage.dataset.captureName;
+  elements.captureStage.dataset.state = "idle";
+  elements.captureImageStatus.hidden = true;
 }
 
 function createEventItem(event) {
@@ -1340,6 +1438,7 @@ function selectionMatchesBucket(bucket) {
 }
 
 function beginActivityFilter(message) {
+  if (elements.captureDialog.open) elements.captureDialog.close();
   viewState.eventCursor = null;
   viewState.events = [];
   elements.eventGrid.replaceChildren();
@@ -1449,10 +1548,10 @@ function renderEvents() {
   elements.eventPagination.hidden = viewState.eventCursor == null;
   renderEventActivity();
   renderEventSummary();
+  if (elements.captureDialog.open) renderCaptureViewer();
 }
 
-async function refreshEvents({ append = false } = {}) {
-  if (viewState.eventsBusy) return;
+async function performEventRefresh({ append = false } = {}) {
   setEventsBusy(true);
   try {
     const query = new URLSearchParams({ window: viewState.eventWindow, limit: "12" });
@@ -1468,6 +1567,7 @@ async function refreshEvents({ append = false } = {}) {
     viewState.eventActivity = payload.activity;
     viewState.eventSelection = payload.selection;
     renderEvents();
+    return true;
   } catch (error) {
     if (!append) {
       viewState.events = [];
@@ -1482,13 +1582,29 @@ async function refreshEvents({ append = false } = {}) {
     elements.eventsMeta.textContent = "Archive unavailable";
     elements.retentionMeta.textContent = "Archive policy unavailable";
     renderEventActivity();
+    return false;
   } finally {
     setEventsBusy(false);
   }
 }
 
+async function refreshEvents({ append = false } = {}) {
+  if (eventRefreshRequest) {
+    if (!append || !(await eventRefreshRequest)) return false;
+  }
+
+  const request = performEventRefresh({ append });
+  eventRefreshRequest = request;
+  try {
+    return await request;
+  } finally {
+    if (eventRefreshRequest === request) eventRefreshRequest = null;
+  }
+}
+
 function selectEventWindow(windowName) {
   if (viewState.eventsBusy || windowName === viewState.eventWindow) return;
+  if (elements.captureDialog.open) elements.captureDialog.close();
   viewState.eventWindow = windowName;
   viewState.eventCursor = null;
   viewState.eventActivity = null;
@@ -1567,9 +1683,37 @@ rangeInputs.forEach((input) => {
 [elements.autoExposureToggle, elements.autoWhiteBalanceToggle].forEach((input) => {
   input.addEventListener("change", () => markControlDirty(input));
 });
+elements.capturePrevious.addEventListener("click", () => moveCapture(-1));
+elements.captureNext.addEventListener("click", () => moveCapture(1));
 elements.dialogClose.addEventListener("click", () => elements.captureDialog.close());
+elements.captureImage.addEventListener("load", () => {
+  elements.captureStage.dataset.state = "ready";
+  elements.captureImageStatus.hidden = true;
+});
+elements.captureImage.addEventListener("error", () => {
+  elements.captureStage.dataset.state = "error";
+  elements.captureImageStatus.textContent = "Capture unavailable";
+  elements.captureImageStatus.hidden = false;
+});
+elements.captureDialog.addEventListener("close", resetCaptureViewer);
 elements.captureDialog.addEventListener("click", (event) => {
   if (event.target === elements.captureDialog) elements.captureDialog.close();
+});
+document.addEventListener("keydown", (event) => {
+  if (
+    !elements.captureDialog.open
+    || event.defaultPrevented
+    || event.altKey
+    || event.ctrlKey
+    || event.metaKey
+  ) return;
+  if (event.key === "ArrowLeft") {
+    event.preventDefault();
+    moveCapture(-1);
+  } else if (event.key === "ArrowRight") {
+    event.preventDefault();
+    moveCapture(1);
+  }
 });
 document.addEventListener("fullscreenchange", () => {
   elements.fullscreenButton.textContent = document.fullscreenElement ? "Exit fullscreen" : "Fullscreen";

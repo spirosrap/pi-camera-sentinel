@@ -1261,7 +1261,7 @@ footer {
 }
 
 dialog {
-  width: min(960px, calc(100% - 32px));
+  width: min(1080px, calc(100% - 32px));
   max-height: calc(100vh - 32px);
   padding: 0;
   overflow: hidden;
@@ -1284,19 +1284,138 @@ dialog::backdrop {
   border-bottom: 1px solid var(--line);
 }
 
-dialog img {
+.capture-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.capture-heading span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dialog-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.dialog-actions button,
+.dialog-icon-button {
+  display: grid;
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
+  min-height: 36px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  color: var(--ink);
+  background: var(--surface);
+  font-size: 20px;
+  line-height: 1;
+  text-decoration: none;
+}
+
+.dialog-icon-button:hover {
+  border-color: var(--ink);
+  background: #f8faf7;
+}
+
+.capture-stage {
+  position: relative;
+  display: grid;
+  width: 100%;
+  max-height: calc(100vh - 142px);
+  aspect-ratio: 16 / 9;
+  place-items: center;
+  overflow: hidden;
+  background: var(--viewer);
+}
+
+.capture-stage img {
   display: block;
   width: 100%;
-  max-height: calc(100vh - 130px);
+  height: 100%;
   object-fit: contain;
   background: var(--viewer);
 }
 
-dialog time {
-  display: block;
+.capture-image-status {
+  position: absolute;
+  z-index: 1;
+  padding: 7px 9px;
+  border-radius: 4px;
+  color: #ffffff;
+  background: rgba(9, 12, 10, 0.82);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.capture-image-status[hidden] {
+  display: none;
+}
+
+.capture-nav {
+  position: absolute;
+  z-index: 2;
+  top: 50%;
+  width: 42px;
+  min-width: 42px;
+  height: 48px;
+  min-height: 48px;
+  padding: 0;
+  border-color: rgba(255, 255, 255, 0.55);
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.92);
+  font-size: 22px;
+  transform: translateY(-50%);
+}
+
+.capture-nav:hover {
+  background: #ffffff;
+}
+
+.capture-nav:disabled {
+  border-color: rgba(255, 255, 255, 0.25);
+  opacity: 0.32;
+  cursor: default;
+}
+
+.capture-previous {
+  left: 12px;
+}
+
+.capture-next {
+  right: 12px;
+}
+
+.capture-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
   padding: 9px 12px;
   color: var(--muted);
   font-size: 12px;
+}
+
+.capture-meta time,
+.capture-meta span {
+  min-width: 0;
+}
+
+.capture-meta time {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @media (max-width: 1050px) {
@@ -1346,6 +1465,45 @@ dialog time {
 }
 
 @media (max-width: 720px) {
+  dialog {
+    width: calc(100% - 16px);
+  }
+
+  .dialog-bar {
+    gap: 10px;
+    padding: 8px;
+  }
+
+  .capture-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .capture-stage {
+    max-height: calc(100vh - 126px);
+  }
+
+  .capture-nav {
+    width: 38px;
+    min-width: 38px;
+    height: 42px;
+    min-height: 42px;
+    font-size: 20px;
+  }
+
+  .capture-previous {
+    left: 8px;
+  }
+
+  .capture-next {
+    right: 8px;
+  }
+
+  .capture-meta {
+    padding: 8px 10px;
+  }
+
   .topbar {
     min-height: 60px;
     padding: 9px 14px;

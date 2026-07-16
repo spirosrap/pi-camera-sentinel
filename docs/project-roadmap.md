@@ -21,6 +21,7 @@
 - confirmed system-health Telegram warnings with persistent retry state
 - range-aware motion activity insights from retained captures
 - interactive activity period drill-down with server-side filtering
+- continuous archive review viewer with seamless pagination
 - systemd installer
 
 ## Non-Goals For Now
