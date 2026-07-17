@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.16.2 - 2026-07-17
+
+- Keep a client build identity in the HTML instead of presenting the server version as the loaded UI version.
+- Automatically replace stale dashboard documents with a versioned, timestamped URL when the server release changes.
+- Prevent an old native-MJPEG page from appearing current after only its status response updates.
+
 ## 1.16.1 - 2026-07-17
 
 - Replace the browser's unreliable native MJPEG image renderer with a streamed JPEG canvas renderer.

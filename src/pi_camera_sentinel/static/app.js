@@ -112,6 +112,7 @@ const viewState = {
   policyState: null,
   recoveryBusy: false,
   recoveryState: null,
+  reloadScheduled: false,
   healthAlertState: null,
   serviceBusy: new Set(),
   servicesBusy: false,
@@ -134,6 +135,7 @@ const viewState = {
 };
 
 let eventRefreshRequest = null;
+const clientVersion = document.documentElement.dataset.clientVersion || "unknown";
 
 const serviceElements = {
   motion: {
@@ -248,6 +250,18 @@ function exposureLabel(meanLuma) {
   if (meanLuma < 45) return ["Low light", `Luma ${meanLuma}`];
   if (meanLuma > 220) return ["Very bright", `Luma ${meanLuma}`];
   return ["Balanced", `Luma ${meanLuma}`];
+}
+
+function reconcileClientVersion(serverVersion) {
+  if (!serverVersion || serverVersion === clientVersion) return true;
+  if (!viewState.reloadScheduled) {
+    viewState.reloadScheduled = true;
+    const target = new URL(window.location.href);
+    target.searchParams.set("sentinel_version", serverVersion);
+    target.searchParams.set("sentinel_refresh", String(Date.now()));
+    window.location.replace(target);
+  }
+  return false;
 }
 
 function setHealthState(state) {
@@ -567,11 +581,12 @@ async function toggleFullscreen() {
 }
 
 function renderStatus(status) {
+  if (!reconcileClientVersion(status.version)) return;
   const { automation, camera, feed, integrations, system, warnings } = status;
   document.title = status.title;
   elements.appTitle.textContent = status.title;
-  elements.appVersion.textContent = `v${status.version}`;
-  elements.footerVersion.textContent = `${status.title} v${status.version}`;
+  elements.appVersion.textContent = `v${clientVersion}`;
+  elements.footerVersion.textContent = `${status.title} v${clientVersion}`;
   elements.footerHost.textContent = system.hostname;
   elements.cameraSource.textContent = camera.device;
   setHealthState(status.state);
