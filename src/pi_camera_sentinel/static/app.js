@@ -56,19 +56,6 @@ const elements = {
   healthState: document.querySelector("#health-state"),
   localClock: document.querySelector("#local-clock"),
   monitoringSection: document.querySelector("#monitoring-section"),
-  maskAddButton: document.querySelector("#motion-mask-add"),
-  maskApplyButton: document.querySelector("#motion-mask-apply"),
-  maskCanvas: document.querySelector("#motion-mask-canvas"),
-  maskClearButton: document.querySelector("#motion-mask-clear"),
-  maskMessage: document.querySelector("#motion-mask-message"),
-  maskMeta: document.querySelector("#motion-mask-meta"),
-  maskPreview: document.querySelector("#motion-mask-preview"),
-  maskPreviewNotice: document.querySelector("#motion-mask-preview-notice"),
-  maskPreviewShell: document.querySelector("#motion-mask-preview-shell"),
-  maskRefreshButton: document.querySelector("#motion-mask-refresh"),
-  maskRemoveButton: document.querySelector("#motion-mask-remove"),
-  maskResetButton: document.querySelector("#motion-mask-reset"),
-  maskSection: document.querySelector("#motion-mask-section"),
   pauseButton: document.querySelector("#pause-button"),
   powerDetail: document.querySelector("#power-detail"),
   powerMetric: document.querySelector("#power-metric"),
@@ -117,15 +104,6 @@ const viewState = {
   eventWindow: "24h",
   events: [],
   eventsBusy: false,
-  maskBusy: false,
-  maskDirty: false,
-  maskDraft: null,
-  maskDrawing: false,
-  maskPointerStart: null,
-  maskRegions: [],
-  maskSelected: -1,
-  maskState: null,
-  masksInitialized: false,
   monitoringInitialized: false,
   paused: false,
   policyBusy: false,
@@ -193,7 +171,6 @@ const activityTime = new Intl.DateTimeFormat(undefined, { hour: "numeric", minut
 const activityDay = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
 const activityWeekday = new Intl.DateTimeFormat(undefined, { weekday: "short" });
 const clockTime = new Intl.DateTimeFormat(undefined, { timeStyle: "medium" });
-const minimumDrawnMaskSize = 0.02;
 const streamReconnectBaseMs = 1000;
 const streamReconnectMaxMs = 30000;
 const streamVisibilityReconnectMs = 15000;
@@ -833,289 +810,6 @@ async function applyPolicy(event) {
   }
 }
 
-function cloneMaskRegions(regions = []) {
-  return regions.map((region) => ({
-    x: Number(region.x),
-    y: Number(region.y),
-    width: Number(region.width),
-    height: Number(region.height),
-  }));
-}
-
-function masksEqual(left, right) {
-  return JSON.stringify(left) === JSON.stringify(right);
-}
-
-function setMaskMessage(message, state = "idle") {
-  elements.maskMessage.textContent = message;
-  elements.maskMessage.dataset.state = state;
-}
-
-function renderMaskMeta() {
-  const count = viewState.maskRegions.length;
-  const noun = count === 1 ? "area" : "areas";
-  elements.maskMeta.textContent = `${count} ignored ${noun}${viewState.maskDirty ? " / unsaved" : ""}`;
-}
-
-function updateMaskControls() {
-  const ready = viewState.maskState !== null;
-  const maximum = viewState.maskState?.max_regions || 0;
-  elements.maskAddButton.disabled = viewState.maskBusy || !ready || (!viewState.maskDrawing && viewState.maskRegions.length >= maximum);
-  elements.maskAddButton.textContent = viewState.maskDrawing ? "Cancel" : "Add area";
-  elements.maskAddButton.setAttribute("aria-pressed", String(viewState.maskDrawing));
-  elements.maskRemoveButton.disabled = viewState.maskBusy || viewState.maskSelected < 0;
-  elements.maskClearButton.disabled = viewState.maskBusy || viewState.maskRegions.length === 0;
-  elements.maskResetButton.disabled = viewState.maskBusy || !viewState.maskDirty;
-  elements.maskRefreshButton.disabled = viewState.maskBusy;
-  elements.maskApplyButton.disabled = viewState.maskBusy || !viewState.maskDirty;
-  elements.maskPreviewShell.classList.toggle("is-drawing", viewState.maskDrawing);
-  renderMaskMeta();
-}
-
-function setMaskBusy(busy) {
-  viewState.maskBusy = busy;
-  updateMaskControls();
-}
-
-function canvasMaskPoint(event) {
-  const bounds = elements.maskCanvas.getBoundingClientRect();
-  return {
-    x: Math.min(1, Math.max(0, (event.clientX - bounds.left) / bounds.width)),
-    y: Math.min(1, Math.max(0, (event.clientY - bounds.top) / bounds.height)),
-  };
-}
-
-function normalizedMaskRegion(start, end) {
-  const x = Number(Math.min(start.x, end.x).toFixed(4));
-  const y = Number(Math.min(start.y, end.y).toFixed(4));
-  const width = Number(Math.abs(end.x - start.x).toFixed(4));
-  const height = Number(Math.abs(end.y - start.y).toFixed(4));
-  return {
-    x,
-    y,
-    width: Math.min(1 - x, width),
-    height: Math.min(1 - y, height),
-  };
-}
-
-function drawMotionMasks() {
-  const bounds = elements.maskCanvas.getBoundingClientRect();
-  if (!bounds.width || !bounds.height) return;
-  const ratio = window.devicePixelRatio || 1;
-  const width = Math.round(bounds.width * ratio);
-  const height = Math.round(bounds.height * ratio);
-  if (elements.maskCanvas.width !== width || elements.maskCanvas.height !== height) {
-    elements.maskCanvas.width = width;
-    elements.maskCanvas.height = height;
-  }
-  const context = elements.maskCanvas.getContext("2d");
-  if (!context) return;
-  context.setTransform(ratio, 0, 0, ratio, 0, 0);
-  context.clearRect(0, 0, bounds.width, bounds.height);
-
-  const regions = viewState.maskDraft
-    ? [...viewState.maskRegions, viewState.maskDraft]
-    : viewState.maskRegions;
-  regions.forEach((region, index) => {
-    const x = region.x * bounds.width;
-    const y = region.y * bounds.height;
-    const regionWidth = region.width * bounds.width;
-    const regionHeight = region.height * bounds.height;
-    const selected = index === viewState.maskSelected || index >= viewState.maskRegions.length;
-    context.fillStyle = selected ? "rgba(182, 58, 53, 0.34)" : "rgba(182, 58, 53, 0.22)";
-    context.strokeStyle = selected ? "#fbe8e6" : "rgba(255, 255, 255, 0.86)";
-    context.lineWidth = selected ? 3 : 2;
-    context.setLineDash(selected ? [] : [7, 5]);
-    context.fillRect(x, y, regionWidth, regionHeight);
-    context.strokeRect(x, y, regionWidth, regionHeight);
-
-    if (regionWidth >= 30 && regionHeight >= 26) {
-      context.setLineDash([]);
-      context.fillStyle = selected ? "#b63a35" : "#171a18";
-      context.fillRect(x + 6, y + 6, 24, 20);
-      context.fillStyle = "#ffffff";
-      context.font = "700 12px Inter, sans-serif";
-      context.textAlign = "center";
-      context.textBaseline = "middle";
-      context.fillText(String(index + 1), x + 18, y + 16);
-    }
-  });
-  context.setLineDash([]);
-}
-
-function maskRegionAt(point) {
-  for (let index = viewState.maskRegions.length - 1; index >= 0; index -= 1) {
-    const region = viewState.maskRegions[index];
-    if (
-      point.x >= region.x
-      && point.x <= region.x + region.width
-      && point.y >= region.y
-      && point.y <= region.y + region.height
-    ) return index;
-  }
-  return -1;
-}
-
-function stopMaskDrawing() {
-  viewState.maskDrawing = false;
-  viewState.maskPointerStart = null;
-  viewState.maskDraft = null;
-  updateMaskControls();
-  drawMotionMasks();
-}
-
-function markMasksDirty(message = "Unsaved motion masks") {
-  viewState.maskDirty = !masksEqual(viewState.maskRegions, viewState.maskState?.regions || []);
-  setMaskMessage(viewState.maskDirty ? message : "Motion masks up to date");
-  updateMaskControls();
-  drawMotionMasks();
-}
-
-function renderMotionMasks(state, message = "Motion masks up to date") {
-  viewState.maskState = {
-    ...state,
-    regions: cloneMaskRegions(state.regions),
-  };
-  viewState.maskRegions = cloneMaskRegions(state.regions);
-  viewState.maskSelected = -1;
-  viewState.maskDirty = false;
-  stopMaskDrawing();
-  setMaskBusy(false);
-  setMaskMessage(message, "success");
-  drawMotionMasks();
-}
-
-async function refreshMotionMasks(force = false) {
-  if (
-    viewState.maskBusy
-    || viewState.maskDrawing
-    || viewState.maskPointerStart
-    || (viewState.maskDirty && !force)
-  ) return;
-  setMaskBusy(true);
-  setMaskMessage("Reading motion masks");
-  try {
-    renderMotionMasks(await requestJSON("/api/masks"));
-  } catch (error) {
-    viewState.maskState = null;
-    setMaskBusy(false);
-    setMaskMessage(error.message, "error");
-  }
-}
-
-function refreshMotionMaskFrame() {
-  elements.maskPreviewNotice.textContent = "Loading frame";
-  elements.maskPreviewNotice.hidden = false;
-  elements.maskPreview.src = `/snapshot?t=${Date.now()}`;
-}
-
-function toggleMaskDrawing() {
-  if (viewState.maskDrawing) {
-    stopMaskDrawing();
-    setMaskMessage("Drawing cancelled");
-    return;
-  }
-  if (!viewState.maskState || viewState.maskRegions.length >= viewState.maskState.max_regions) return;
-  viewState.maskSelected = -1;
-  viewState.maskDrawing = true;
-  setMaskMessage(`Drawing area ${viewState.maskRegions.length + 1}`);
-  updateMaskControls();
-  drawMotionMasks();
-}
-
-function removeSelectedMask() {
-  if (viewState.maskSelected < 0) return;
-  viewState.maskRegions.splice(viewState.maskSelected, 1);
-  viewState.maskSelected = -1;
-  markMasksDirty();
-}
-
-function clearMotionMasks() {
-  viewState.maskRegions = [];
-  viewState.maskSelected = -1;
-  stopMaskDrawing();
-  markMasksDirty();
-}
-
-function resetMotionMasks() {
-  if (!viewState.maskState) return;
-  viewState.maskRegions = cloneMaskRegions(viewState.maskState.regions);
-  viewState.maskSelected = -1;
-  viewState.maskDirty = false;
-  stopMaskDrawing();
-  setMaskMessage("Unsaved changes discarded");
-  updateMaskControls();
-  drawMotionMasks();
-}
-
-async function applyMotionMasks() {
-  if (!viewState.maskDirty || viewState.maskBusy) return;
-  setMaskBusy(true);
-  setMaskMessage("Applying motion masks");
-  try {
-    const state = await requestJSON("/api/masks", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ regions: viewState.maskRegions }),
-    });
-    renderMotionMasks(state, "Motion masks applied");
-  } catch (error) {
-    setMaskBusy(false);
-    setMaskMessage(error.message, "error");
-  }
-}
-
-function beginMaskPointer(event) {
-  if (!viewState.maskState || viewState.maskBusy) return;
-  const point = canvasMaskPoint(event);
-  if (!viewState.maskDrawing) {
-    viewState.maskSelected = maskRegionAt(point);
-    updateMaskControls();
-    drawMotionMasks();
-    return;
-  }
-  event.preventDefault();
-  viewState.maskPointerStart = point;
-  viewState.maskDraft = normalizedMaskRegion(point, point);
-  elements.maskCanvas.setPointerCapture(event.pointerId);
-  drawMotionMasks();
-}
-
-function moveMaskPointer(event) {
-  if (!viewState.maskPointerStart) return;
-  event.preventDefault();
-  viewState.maskDraft = normalizedMaskRegion(viewState.maskPointerStart, canvasMaskPoint(event));
-  drawMotionMasks();
-}
-
-function finishMaskPointer(event) {
-  if (!viewState.maskPointerStart) return;
-  event.preventDefault();
-  const region = normalizedMaskRegion(viewState.maskPointerStart, canvasMaskPoint(event));
-  if (elements.maskCanvas.hasPointerCapture(event.pointerId)) {
-    elements.maskCanvas.releasePointerCapture(event.pointerId);
-  }
-  viewState.maskPointerStart = null;
-  viewState.maskDraft = null;
-  viewState.maskDrawing = false;
-  if (region.width >= minimumDrawnMaskSize && region.height >= minimumDrawnMaskSize) {
-    viewState.maskRegions.push(region);
-    viewState.maskSelected = viewState.maskRegions.length - 1;
-    markMasksDirty();
-  } else {
-    setMaskMessage("Area is too small", "error");
-    updateMaskControls();
-    drawMotionMasks();
-  }
-}
-
-function cancelMaskPointer(event) {
-  if (viewState.maskPointerStart && elements.maskCanvas.hasPointerCapture(event.pointerId)) {
-    elements.maskCanvas.releasePointerCapture(event.pointerId);
-  }
-  stopMaskDrawing();
-  setMaskMessage("Drawing cancelled");
-}
 
 function setCameraMessage(message, state = "idle") {
   elements.cameraControlMessage.textContent = message;
@@ -1715,13 +1409,6 @@ function initializeMonitoring() {
   refreshPolicy();
 }
 
-function initializeMotionMasks() {
-  if (viewState.masksInitialized) return;
-  viewState.masksInitialized = true;
-  refreshMotionMasks();
-  refreshMotionMaskFrame();
-}
-
 function initializeCameraTuning() {
   if (viewState.cameraInitialized) return;
   viewState.cameraInitialized = true;
@@ -1734,19 +1421,6 @@ function initializeEvents() {
   refreshEvents();
 }
 
-elements.maskPreview.addEventListener("load", () => {
-  if (elements.maskPreview.naturalWidth && elements.maskPreview.naturalHeight) {
-    elements.maskPreviewShell.style.aspectRatio = `${elements.maskPreview.naturalWidth} / ${elements.maskPreview.naturalHeight}`;
-  }
-  elements.maskPreviewNotice.hidden = true;
-  drawMotionMasks();
-});
-
-elements.maskPreview.addEventListener("error", () => {
-  elements.maskPreviewNotice.textContent = "Frame unavailable";
-  elements.maskPreviewNotice.hidden = false;
-});
-
 elements.pauseButton.addEventListener("click", togglePause);
 elements.reconnectButton.addEventListener("click", () => startStream());
 elements.snapshotButton.addEventListener("click", saveSnapshot);
@@ -1756,16 +1430,6 @@ elements.quietHoursForm.addEventListener("submit", applyPolicy);
 [elements.quietHoursToggle, elements.quietHoursStart, elements.quietHoursEnd].forEach((input) => {
   input.addEventListener("change", markPolicyDirty);
 });
-elements.maskAddButton.addEventListener("click", toggleMaskDrawing);
-elements.maskRemoveButton.addEventListener("click", removeSelectedMask);
-elements.maskClearButton.addEventListener("click", clearMotionMasks);
-elements.maskResetButton.addEventListener("click", resetMotionMasks);
-elements.maskRefreshButton.addEventListener("click", refreshMotionMaskFrame);
-elements.maskApplyButton.addEventListener("click", applyMotionMasks);
-elements.maskCanvas.addEventListener("pointerdown", beginMaskPointer);
-elements.maskCanvas.addEventListener("pointermove", moveMaskPointer);
-elements.maskCanvas.addEventListener("pointerup", finishMaskPointer);
-elements.maskCanvas.addEventListener("pointercancel", cancelMaskPointer);
 elements.webhookTestButton.addEventListener("click", sendWebhookTest);
 elements.recoveryRestartButton.addEventListener("click", restartFeed);
 eventRangeButtons.forEach((button) => {
@@ -1850,7 +1514,6 @@ document.addEventListener("visibilitychange", () => {
       refreshServices();
       refreshPolicy();
     }
-    if (viewState.masksInitialized) refreshMotionMasks();
     if (viewState.eventsInitialized && viewState.events.length <= 12) refreshEvents();
     if (viewState.cameraInitialized) refreshCameraState();
   }, 500);
@@ -1870,16 +1533,9 @@ window.addEventListener("online", () => {
     if (viewState.eventsInitialized && viewState.events.length <= 12) refreshEvents();
   }, 500);
 });
-if ("ResizeObserver" in window) {
-  new ResizeObserver(drawMotionMasks).observe(elements.maskPreviewShell);
-} else {
-  window.addEventListener("resize", drawMotionMasks);
-}
-
 startStream();
 refreshStatus();
 runWhenNear(elements.monitoringSection, initializeMonitoring);
-runWhenNear(elements.maskSection, initializeMotionMasks);
 runWhenNear(elements.tuningSection, initializeCameraTuning);
 runWhenNear(elements.eventsSection, initializeEvents);
 updateClock();
@@ -1891,9 +1547,6 @@ setInterval(() => {
 }, 10000);
 setInterval(() => {
   if (!document.hidden && viewState.monitoringInitialized) refreshPolicy();
-}, 30000);
-setInterval(() => {
-  if (!document.hidden && viewState.masksInitialized) refreshMotionMasks();
 }, 30000);
 setInterval(() => {
   if (!document.hidden && viewState.eventsInitialized && viewState.events.length <= 12) refreshEvents();

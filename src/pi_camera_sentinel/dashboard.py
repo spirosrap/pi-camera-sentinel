@@ -1203,6 +1203,8 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         path = parsed.path
         if path == "/":
             self.serve_static("index.html")
+        elif path in {"/motion-zones", "/motion-zones/"}:
+            self.serve_static("motion-zones.html")
         elif path.startswith("/assets/"):
             self.serve_static(path.removeprefix("/assets/"))
         elif path == "/api/status":
@@ -1426,7 +1428,7 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
             body,
             cache_control=(
                 f"public, max-age={IMMUTABLE_CACHE_SECONDS}, immutable"
-                if target.name != "index.html"
+                if target.suffix.lower() != ".html"
                 else "no-cache"
             ),
             etag=file_etag(stat),

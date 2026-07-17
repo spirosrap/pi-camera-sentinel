@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.12.0 - 2026-07-17
+
+- Move ignored-area editing from the long dashboard into a dedicated `/motion-zones` page.
+- Add an always-visible dashboard-header shortcut to the editor.
+- Label the editor image as a refreshed still frame with its local refresh time.
+- Rename the editor around ignored areas so configured rectangles cannot be mistaken for watched zones.
+- Keep HTML entry points revalidating while preserving immutable caching for versioned assets.
+- Remove motion-editor code from the live dashboard bundle and add dedicated-page regression coverage.
+
 ## 1.11.0 - 2026-07-16
 
 - Read only upstream snapshot headers between brightness samples instead of transferring every JPEG.

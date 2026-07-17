@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#171a18">
+    <meta name="color-scheme" content="light">
+    <title>Ignored Areas | Pi Camera Sentinel</title>
+    <link rel="stylesheet" href="/assets/styles.css?v=1.12.0">
+    <script src="/assets/motion-zones.js?v=1.12.0" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Return to Pi Camera Sentinel live view">
+        <span class="brand-mark" aria-hidden="true"><span></span></span>
+        <span>
+          <span class="brand-kicker">Detection filter</span>
+          <span class="brand-name-row">
+            <strong>Ignored areas</strong>
+            <span class="app-version">v1.12.0</span>
+          </span>
+        </span>
+      </a>
+      <a class="topbar-link" href="/">Live view</a>
+    </header>
+
+    <main class="motion-zones-main">
+      <section class="motion-zone-workspace" aria-labelledby="motion-mask-heading">
+        <div class="section-heading motion-zone-heading">
+          <div>
+            <p class="section-kicker">Motion detection</p>
+            <h1 id="motion-mask-heading">Ignored areas</h1>
+            <p class="section-meta" id="motion-mask-meta" role="status" aria-live="polite">Loading saved areas</p>
+          </div>
+          <div class="mask-legend" aria-label="Area legend">
+            <span class="mask-legend-swatch" aria-hidden="true"></span>
+            <span>Ignored by detection</span>
+          </div>
+        </div>
+
+        <div class="mask-editor-surface">
+          <div class="mask-editor-toolbar">
+            <div class="mask-action-group">
+              <button type="button" id="motion-mask-add" title="Draw a new ignored area on the still frame">Add area</button>
+              <button type="button" id="motion-mask-remove" title="Remove the selected ignored area" disabled>Remove</button>
+              <button type="button" id="motion-mask-clear" title="Remove every ignored area" disabled>Clear all</button>
+              <button type="button" id="motion-mask-reset" title="Discard unsaved changes" disabled>Reset</button>
+            </div>
+            <button type="button" id="motion-mask-refresh" title="Capture a new still frame">Refresh frame</button>
+          </div>
+
+          <div class="mask-preview-shell" id="motion-mask-preview-shell">
+            <img id="motion-mask-preview" alt="Still camera frame for editing ignored motion areas" decoding="async">
+            <canvas id="motion-mask-canvas" aria-label="Ignored motion areas"></canvas>
+            <div class="mask-frame-status" aria-live="polite">
+              <strong>Still frame</strong>
+              <time id="motion-mask-frame-time">Refreshing</time>
+            </div>
+            <div class="mask-preview-notice" id="motion-mask-preview-notice" role="status">Loading still frame</div>
+          </div>
+
+          <div class="mask-editor-foot">
+            <p id="motion-mask-message" role="status" aria-live="polite">Reading ignored areas</p>
+            <button type="button" id="motion-mask-apply" disabled>Apply areas</button>
+          </div>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

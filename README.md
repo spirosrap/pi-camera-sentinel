@@ -147,7 +147,7 @@ The `pi-camera-sentinel serve` command provides a small same-origin web app on p
 - active Telegram alert-batching window and photo limit
 - secret-safe Home Assistant webhook state and test delivery
 - quiet-hours schedule controls for Telegram notifications
-- a pointer- and touch-friendly editor for ignored motion areas
+- a dedicated `/motion-zones` page with a pointer- and touch-friendly editor for ignored motion areas
 - camera profiles plus safe manual exposure, color, gain, sharpness, and white-balance controls
 - retained motion snapshots with 24-hour, 7-day, and all-time filters
 - motion activity totals, active periods, peak period, and rolling trend chart
@@ -237,7 +237,7 @@ Run the same command without `--dry-run` to apply it immediately. See [docs/arch
 
 Quiet hours are stored atomically in `SENTINEL_POLICY_FILE`. Set `SENTINEL_TIMEZONE` to an IANA timezone such as `Europe/Athens` when the schedule should not follow the Pi's system timezone. Motion captures remain in the archive during quiet hours; only Telegram delivery is suppressed.
 
-Motion masks are stored atomically in `SENTINEL_MASK_FILE`, which defaults to `motion-masks.json` beside the alert policy. The dashboard supports up to eight normalized rectangles. Masked areas remain visible in the feed and saved captures; they are excluded only from motion detection. The running monitor reloads changes within five seconds.
+Motion masks are stored atomically in `SENTINEL_MASK_FILE`, which defaults to `motion-masks.json` beside the alert policy. The dedicated `/motion-zones` editor supports up to eight normalized rectangles and labels its camera image as a refreshed still frame rather than a live feed. Masked areas remain visible in the feed and saved captures; they are excluded only from motion detection. The running monitor reloads changes within five seconds.
 
 ## Home Assistant Webhook
 

@@ -396,6 +396,23 @@ def test_static_assets_are_compressed_and_conditionally_cached(dashboard_server)
     assert cached.content == b""
 
 
+def test_motion_zone_editor_is_a_dedicated_no_cache_page(dashboard_server):
+    base_url, _settings = dashboard_server
+
+    dashboard = requests.get(f"{base_url}/", timeout=2)
+    editor = requests.get(f"{base_url}/motion-zones", timeout=2)
+
+    assert dashboard.status_code == 200
+    assert 'href="/motion-zones"' in dashboard.text
+    assert 'id="motion-mask-canvas"' not in dashboard.text
+    assert editor.status_code == 200
+    assert editor.headers["Cache-Control"] == "no-cache"
+    assert "Ignored areas" in editor.text
+    assert "Still frame" in editor.text
+    assert 'id="motion-mask-canvas"' in editor.text
+    assert 'id="camera-stream"' not in editor.text
+
+
 def test_client_disconnect_is_not_reclassified_as_policy_failure():
     handler = object.__new__(DashboardRequestHandler)
 
