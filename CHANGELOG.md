@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.17.0 - 2026-07-17
+
+- Keep the last rendered frame unobstructed during transport reconnects that recover within 15 seconds.
+- Switch automatically to a two-frame-per-second snapshot stream after three long-lived stream failures in one minute.
+- Keep snapshot fallback recovery in the same canvas without exposing a mode change or broken-image surface.
+- Hold the relay's shared Pi stream open for 30 seconds across brief viewer gaps to prevent connection churn.
+- Reserve the centered reconnect notice for sustained interruptions and genuine camera outages.
+
 ## 1.16.2 - 2026-07-17
 
 - Keep a client build identity in the HTML instead of presenting the server version as the loaded UI version.

@@ -422,12 +422,15 @@ def test_dashboard_stream_has_a_latest_frame_fallback(dashboard_server):
 
     assert dashboard.status_code == 200
     assert 'id="camera-fallback"' in dashboard.text
-    assert 'data-client-version="1.16.2"' in dashboard.text
+    assert 'data-client-version="1.17.0"' in dashboard.text
     assert '<canvas class="stream-live" id="camera-stream"' in dashboard.text
     assert 'data-has-frame="false"' in dashboard.text
     assert "function inspectStreamHealth()" in script.text
     assert "async function consumeStream(" in script.text
+    assert "async function consumeSnapshotStream(" in script.text
     assert "function extractStreamFrames(" in script.text
+    assert "function updateReconnectNotice(" in script.text
+    assert "const streamFailureThreshold = 3;" in script.text
     assert "function reconcileClientVersion(" in script.text
     assert 'target.searchParams.set("sentinel_version", serverVersion);' in script.text
     assert "refreshStreamFallback();" in script.text

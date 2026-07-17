@@ -75,6 +75,7 @@ class RelaySettings:
     snapshot_url: str
     connect_timeout: float = 5.0
     request_timeout: float = 30.0
+    stream_idle_timeout: float = 30.0
     stream_read_timeout: float = 10.0
     stream_client_timeout: float = 90.0
 
@@ -102,6 +103,10 @@ class RelaySettings:
             request_timeout=positive_float(
                 os.environ.get("SENTINEL_RELAY_REQUEST_TIMEOUT", "30"),
                 "SENTINEL_RELAY_REQUEST_TIMEOUT",
+            ),
+            stream_idle_timeout=positive_float(
+                os.environ.get("SENTINEL_RELAY_STREAM_IDLE_TIMEOUT", "30"),
+                "SENTINEL_RELAY_STREAM_IDLE_TIMEOUT",
             ),
             stream_read_timeout=positive_float(
                 os.environ.get("SENTINEL_RELAY_STREAM_READ_TIMEOUT", "10"),
@@ -319,6 +324,7 @@ class RelayHTTPServer(ThreadingHTTPServer):
             settings.stream_url,
             settings.connect_timeout,
             settings.stream_read_timeout,
+            idle_timeout=settings.stream_idle_timeout,
         )
         super().__init__(server_address, RelayRequestHandler)
 

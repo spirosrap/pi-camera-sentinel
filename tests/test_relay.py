@@ -200,6 +200,7 @@ def test_relay_routes_dashboard_and_media_without_reencoding():
 
 def test_relay_fans_multiple_viewers_out_from_one_camera_stream():
     dashboard, camera, relay = relay_stack()
+    assert relay.shared_stream.idle_timeout == 30.0
     with running_server(dashboard), running_server(camera), running_server(relay):
         base = f"http://127.0.0.1:{relay.server_port}"
         first = requests.get(f"{base}/stream?viewer=1", timeout=2, stream=True)

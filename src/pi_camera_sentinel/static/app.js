@@ -119,10 +119,14 @@ const viewState = {
   serviceStates: {},
   statusBusy: false,
   streamAbortController: null,
+  streamFailureTimes: [],
   streamFeedOnline: null,
   streamGeneration: 0,
+  streamInterruptionStartedAt: null,
   streamLastRenderedAt: null,
   streamLoaded: false,
+  streamMode: "mjpeg",
+  streamNoticeTimer: null,
   streamPendingFrame: null,
   streamStartedAt: null,
   streamRendering: false,
@@ -182,8 +186,12 @@ const clockTime = new Intl.DateTimeFormat(undefined, { timeStyle: "medium" });
 const streamReconnectBaseMs = 750;
 const streamReconnectMaxMs = 8000;
 const streamConnectTimeoutMs = 10000;
+const streamFailureThreshold = 3;
+const streamFailureWindowMs = 60000;
 const streamFrameTimeoutMs = 5000;
 const streamMaxBufferBytes = 8 * 1024 * 1024;
+const streamNoticeDelayMs = 15000;
+const streamSnapshotIntervalMs = 500;
 const requestTimeoutMs = 10000;
 const deferredSectionMargin = "600px 0px";
 
@@ -292,6 +300,48 @@ function clearStreamReconnect() {
   }
 }
 
+function clearStreamNoticeTimer() {
+  if (viewState.streamNoticeTimer !== null) {
+    window.clearTimeout(viewState.streamNoticeTimer);
+    viewState.streamNoticeTimer = null;
+  }
+}
+
+function hasRenderedStreamFrame() {
+  return elements.streamShell.dataset.hasFrame === "true";
+}
+
+function resetStreamInterruption() {
+  clearStreamNoticeTimer();
+  viewState.streamInterruptionStartedAt = null;
+}
+
+function updateReconnectNotice(message, quiet, delay) {
+  if (!quiet || !hasRenderedStreamFrame()) {
+    clearStreamNoticeTimer();
+    showStreamNotice(
+      delay === 0
+        ? `${message} / reconnecting`
+        : `${message} / retrying in ${Math.ceil(delay / 1000)}s`,
+    );
+    return;
+  }
+
+  if (viewState.streamInterruptionStartedAt === null) {
+    viewState.streamInterruptionStartedAt = Date.now();
+  }
+  hideStreamNotice();
+  if (viewState.streamNoticeTimer !== null) return;
+  const elapsed = Date.now() - viewState.streamInterruptionStartedAt;
+  const remaining = Math.max(0, streamNoticeDelayMs - elapsed);
+  viewState.streamNoticeTimer = window.setTimeout(() => {
+    viewState.streamNoticeTimer = null;
+    if (!viewState.streamLoaded && !viewState.paused && !document.hidden) {
+      showStreamNotice("Reconnecting live view");
+    }
+  }, remaining);
+}
+
 function streamReconnectDelay(attempt) {
   return Math.min(streamReconnectBaseMs * (2 ** Math.min(attempt, 5)), streamReconnectMaxMs);
 }
@@ -330,6 +380,7 @@ function markStreamReady(generation) {
   viewState.streamReconnectAttempt = 0;
   viewState.streamLoaded = true;
   viewState.streamStartedAt = null;
+  resetStreamInterruption();
   elements.streamShell.dataset.state = "live";
   hideStreamNotice();
   if (!elements.streamFallback.src) refreshStreamFallback();
@@ -385,7 +436,7 @@ async function renderPendingStreamFrames() {
         context.drawImage(decoded.image, 0, 0, elements.stream.width, elements.stream.height);
         viewState.streamLastRenderedAt = Date.now();
         elements.streamShell.dataset.hasFrame = "true";
-        setStreamDiagnostic("live");
+        setStreamDiagnostic(viewState.streamMode === "snapshot" ? "snapshot-live" : "live");
         markStreamReady(pending.generation);
       } catch (error) {
         if (pending.generation === viewState.streamGeneration) {
@@ -453,17 +504,7 @@ async function consumeStream(generation, controller) {
       buffer = extractStreamFrames(buffer, result.value, generation);
     }
   } catch (error) {
-    if (
-      generation !== viewState.streamGeneration
-      || viewState.streamAbortController !== controller
-      || controller.signal.aborted
-      || viewState.paused
-      || document.hidden
-    ) return;
-    viewState.streamAbortController = null;
-    viewState.streamLoaded = false;
-    setStreamDiagnostic("stream-error", error.message);
-    scheduleStreamReconnect("Camera stream interrupted");
+    handleStreamFailure(generation, controller, error);
   } finally {
     if (reader !== null) {
       try {
@@ -475,9 +516,67 @@ async function consumeStream(generation, controller) {
   }
 }
 
-function startStream({ resetBackoff = true, message = "Connecting to camera" } = {}) {
+function recordMjpegFailure() {
+  const cutoff = Date.now() - streamFailureWindowMs;
+  viewState.streamFailureTimes = viewState.streamFailureTimes.filter((time) => time >= cutoff);
+  viewState.streamFailureTimes.push(Date.now());
+  if (viewState.streamFailureTimes.length < streamFailureThreshold) return false;
+  viewState.streamMode = "snapshot";
+  elements.streamShell.dataset.streamMode = "snapshot";
+  return true;
+}
+
+function handleStreamFailure(generation, controller, error) {
+  if (
+    generation !== viewState.streamGeneration
+    || viewState.streamAbortController !== controller
+    || controller.signal.aborted
+    || viewState.paused
+    || document.hidden
+  ) return;
+  viewState.streamAbortController = null;
+  viewState.streamLoaded = false;
+  const switchedMode = viewState.streamMode === "mjpeg" && recordMjpegFailure();
+  setStreamDiagnostic(
+    viewState.streamMode === "snapshot" ? "snapshot-error" : "stream-error",
+    error.message,
+  );
+  const quiet = hasRenderedStreamFrame() && viewState.streamFeedOnline !== false;
+  scheduleStreamReconnect("Camera stream interrupted", { immediate: switchedMode, quiet });
+}
+
+async function consumeSnapshotStream(generation, controller) {
+  try {
+    while (generation === viewState.streamGeneration && !controller.signal.aborted) {
+      setStreamDiagnostic("snapshot-reading");
+      const response = await fetch(`/snapshot?t=${Date.now()}`, {
+        cache: "no-store",
+        headers: { Accept: "image/jpeg" },
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error(`Camera snapshot returned HTTP ${response.status}`);
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      if (bytes.length === 0) throw new Error("Camera snapshot was empty");
+      queueStreamFrame(bytes, generation);
+      await new Promise((resolve) => window.setTimeout(resolve, streamSnapshotIntervalMs));
+    }
+  } catch (error) {
+    handleStreamFailure(generation, controller, error);
+  }
+}
+
+function startStream({
+  resetBackoff = true,
+  resetMode = false,
+  quiet = false,
+  message = "Connecting to camera",
+} = {}) {
   clearStreamReconnect();
   stopStreamRequest();
+  if (resetMode) {
+    viewState.streamFailureTimes = [];
+    viewState.streamMode = "mjpeg";
+  }
   viewState.streamGeneration += 1;
   const generation = viewState.streamGeneration;
   if (resetBackoff) viewState.streamReconnectAttempt = 0;
@@ -488,20 +587,30 @@ function startStream({ resetBackoff = true, message = "Connecting to camera" } =
   viewState.streamStartedAt = Date.now();
   elements.pauseButton.textContent = "Pause";
   elements.streamShell.dataset.state = "connecting";
+  elements.streamShell.dataset.streamMode = viewState.streamMode;
   setStreamDiagnostic("connecting");
-  showStreamNotice(message);
+  if (quiet && hasRenderedStreamFrame()) {
+    hideStreamNotice();
+  } else {
+    showStreamNotice(message);
+  }
   refreshStreamFallback();
   const controller = new AbortController();
   viewState.streamAbortController = controller;
-  consumeStream(generation, controller);
+  if (viewState.streamMode === "snapshot") {
+    consumeSnapshotStream(generation, controller);
+  } else {
+    consumeStream(generation, controller);
+  }
 }
 
-function scheduleStreamReconnect(message, { immediate = false } = {}) {
+function scheduleStreamReconnect(message, { immediate = false, quiet = false } = {}) {
   if (viewState.paused) return;
   if (immediate) {
     clearStreamReconnect();
     viewState.streamReconnectAttempt = 0;
   } else if (viewState.streamReconnectTimer !== null) {
+    if (!quiet) updateReconnectNotice(message, false, 0);
     return;
   }
   stopStreamRequest();
@@ -518,19 +627,16 @@ function scheduleStreamReconnect(message, { immediate = false } = {}) {
   const delay = immediate ? 0 : streamReconnectDelay(viewState.streamReconnectAttempt);
   if (!immediate) viewState.streamReconnectAttempt += 1;
   elements.streamShell.dataset.state = "retrying";
-  showStreamNotice(
-    delay === 0
-      ? `${message} / reconnecting`
-      : `${message} / retrying in ${Math.ceil(delay / 1000)}s`,
-  );
+  updateReconnectNotice(message, quiet, delay);
   viewState.streamReconnectTimer = window.setTimeout(() => {
     viewState.streamReconnectTimer = null;
-    startStream({ resetBackoff: false, message: "Reconnecting to camera" });
+    startStream({ resetBackoff: false, quiet, message: "Reconnecting to camera" });
   }, delay);
 }
 
 function pauseStream() {
   clearStreamReconnect();
+  resetStreamInterruption();
   stopStreamRequest();
   viewState.streamGeneration += 1;
   viewState.streamReconnectAttempt = 0;
@@ -552,7 +658,8 @@ function inspectStreamHealth() {
   if (freshnessStartedAt !== null && Date.now() - freshnessStartedAt >= timeout) {
     viewState.streamLoaded = false;
     setStreamDiagnostic("stalled", "No complete frame was drawn before the freshness deadline");
-    scheduleStreamReconnect("Live view interrupted");
+    const quiet = hasRenderedStreamFrame() && viewState.streamFeedOnline !== false;
+    scheduleStreamReconnect("Live view interrupted", { quiet });
   }
 }
 
@@ -1634,7 +1741,7 @@ function initializeEvents() {
 }
 
 elements.pauseButton.addEventListener("click", togglePause);
-elements.reconnectButton.addEventListener("click", () => startStream());
+elements.reconnectButton.addEventListener("click", () => startStream({ resetMode: true }));
 elements.snapshotButton.addEventListener("click", saveSnapshot);
 elements.fullscreenButton.addEventListener("click", toggleFullscreen);
 elements.cameraRefreshButton.addEventListener("click", () => refreshCameraState("Controls refreshed", true));
@@ -1712,6 +1819,7 @@ document.addEventListener("fullscreenchange", () => {
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
     clearStreamReconnect();
+    resetStreamInterruption();
     stopStreamRequest();
     viewState.streamGeneration += 1;
     viewState.streamLoaded = false;
@@ -1737,6 +1845,7 @@ document.addEventListener("visibilitychange", () => {
 });
 window.addEventListener("offline", () => {
   clearStreamReconnect();
+  resetStreamInterruption();
   stopStreamRequest();
   viewState.streamGeneration += 1;
   viewState.streamFeedOnline = false;

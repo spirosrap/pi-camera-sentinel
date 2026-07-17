@@ -12,7 +12,7 @@ The relay sends `/stream` and `/snapshot` straight to the Pi over the LAN. Dashb
 
 The relay fans all `/stream` viewers out from one lazy upstream MJPEG connection to the Pi. It releases that connection shortly after the last viewer disconnects, so background tabs and multiple devices cannot multiply Pi stream work.
 
-If the Pi stream stalls, the relay reconnects that one upstream connection while keeping browser viewers attached. `SENTINEL_RELAY_STREAM_READ_TIMEOUT` controls how quickly a stalled upstream is replaced; `SENTINEL_RELAY_STREAM_CLIENT_TIMEOUT` controls how long an attached viewer waits through recovery. The defaults are 10 and 90 seconds respectively.
+If the Pi stream stalls, the relay reconnects that one upstream connection while keeping browser viewers attached. `SENTINEL_RELAY_STREAM_READ_TIMEOUT` controls how quickly a stalled upstream is replaced; `SENTINEL_RELAY_STREAM_CLIENT_TIMEOUT` controls how long an attached viewer waits through recovery. The defaults are 10 and 90 seconds respectively. `SENTINEL_RELAY_STREAM_IDLE_TIMEOUT` keeps the Pi connection warm for 30 seconds across brief viewer reconnects.
 
 The relay preserves the original JPEG frame bytes. It does not resize or re-encode them, so resolution, quality, and frame rate remain controlled by `ustreamer` on the Pi.
 
