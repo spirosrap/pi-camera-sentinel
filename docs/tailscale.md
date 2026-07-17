@@ -68,3 +68,7 @@ curl -fsS https://pi-camera.your-tailnet.ts.net/healthz
 ```
 
 If MagicDNS is unreliable, test the raw camera port from the Pi or another trusted LAN device. Tailscale Serve HTTPS relies on the MagicDNS name for its certificate.
+
+## Offload Sustained Streaming
+
+If `tailscaled` consumes most of a Pi CPU core while the MJPEG feed is open, move Tailscale Serve to a faster computer on the same trusted LAN. The optional relay preserves the existing dashboard and sends `/stream` and `/snapshot` directly over the LAN without recompression. See [relay-host.md](relay-host.md).

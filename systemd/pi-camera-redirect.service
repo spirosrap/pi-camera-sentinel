@@ -1,0 +1,27 @@
+[Unit]
+Description=Pi Camera Sentinel retired-URL redirect
+After=network-online.target tailscaled.service
+Wants=network-online.target tailscaled.service
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/pi-camera-redirect.env
+Environment=PYTHONPATH=/opt/pi-camera-sentinel/src
+ExecStart=/usr/bin/python3 -m pi_camera_sentinel.redirect
+Restart=always
+RestartSec=3
+DynamicUser=true
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target

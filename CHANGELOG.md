@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.13.0 - 2026-07-17
+
+- Add an optional LAN-to-Tailscale relay for moving sustained HTTPS and encryption work off the Raspberry Pi.
+- Route live stream and snapshot bytes directly over the trusted LAN without resizing or re-encoding them.
+- Keep dashboard controls, health, motion history, and retained events authoritative on the Pi.
+- Rewrite proxied host and origin headers so same-origin dashboard writes continue to work through the relay.
+- Add an optional low-cost redirect that keeps retired Pi URLs and previously sent alert links working.
+- Add a hardened relay service, Debian/Ubuntu installer, sample configuration, deployment guide, and integration coverage.
+
 ## 1.12.0 - 2026-07-17
 
 - Move ignored-area editing from the long dashboard into a dedicated `/motion-zones` page.
