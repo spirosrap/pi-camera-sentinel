@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.14.0 - 2026-07-17
+
+- Fan every relay viewer out from one shared Pi MJPEG connection instead of opening one Pi stream per browser tab.
+- Start the shared upstream lazily and release it shortly after the last viewer disconnects.
+- Preserve original JPEG frame bytes, resolution, quality, and frame rate without re-encoding.
+- Add multi-viewer integration coverage that proves concurrent viewers create only one camera request.
+
 ## 1.13.0 - 2026-07-17
 
 - Add an optional LAN-to-Tailscale relay for moving sustained HTTPS and encryption work off the Raspberry Pi.

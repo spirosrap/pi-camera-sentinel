@@ -6,6 +6,8 @@ import json
 import logging
 import os
 import sys
+import threading
+import time
 from dataclasses import dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -16,7 +18,12 @@ import requests
 
 LOG = logging.getLogger("pi-camera-sentinel.relay")
 COPY_CHUNK_SIZE = 64 * 1024
+MJPEG_READ_CHUNK_SIZE = 4 * 1024
 MAX_REQUEST_BODY = 1024 * 1024
+MAX_MJPEG_BUFFER = 8 * 1024 * 1024
+MJPEG_BOUNDARY = "sentinelframe"
+JPEG_START = b"\xff\xd8"
+JPEG_END = b"\xff\xd9"
 HOP_BY_HOP_HEADERS = {
     "connection",
     "keep-alive",
@@ -103,6 +110,146 @@ class RelayTarget:
     kind: str
 
 
+class SharedMjpegStream:
+    """Fan one lazy upstream MJPEG connection out to every relay viewer."""
+
+    def __init__(
+        self,
+        url: str,
+        connect_timeout: float,
+        request_timeout: float,
+        idle_timeout: float = 3.0,
+    ):
+        self.url = url
+        self.connect_timeout = connect_timeout
+        self.request_timeout = request_timeout
+        self.idle_timeout = idle_timeout
+        self._condition = threading.Condition()
+        self._frame: bytes | None = None
+        self._sequence = 0
+        self._subscribers = 0
+        self._idle_since: float | None = None
+        self._worker: threading.Thread | None = None
+        self._stopping = False
+
+    def subscribe(self) -> int:
+        with self._condition:
+            self._subscribers += 1
+            self._idle_since = None
+            if self._worker is None or not self._worker.is_alive():
+                self._frame = None
+                sequence = self._sequence
+                self._start_worker_locked()
+                return sequence
+            return max(0, self._sequence - 1)
+
+    def unsubscribe(self) -> None:
+        with self._condition:
+            self._subscribers = max(0, self._subscribers - 1)
+            if self._subscribers == 0:
+                self._idle_since = time.monotonic()
+            self._condition.notify_all()
+
+    def frame_after(self, sequence: int, timeout: float) -> tuple[int, bytes] | None:
+        deadline = time.monotonic() + timeout
+        with self._condition:
+            while self._sequence <= sequence and not self._stopping:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return None
+                self._condition.wait(remaining)
+            if self._frame is None or self._sequence <= sequence:
+                return None
+            return self._sequence, self._frame
+
+    def close(self) -> None:
+        with self._condition:
+            self._stopping = True
+            self._condition.notify_all()
+            worker = self._worker
+        if worker is not None:
+            worker.join(timeout=2)
+
+    def _should_stop_upstream(self) -> bool:
+        with self._condition:
+            if self._stopping:
+                return True
+            if self._subscribers > 0 or self._idle_since is None:
+                return False
+            return time.monotonic() - self._idle_since >= self.idle_timeout
+
+    def _publish(self, frame: bytes) -> None:
+        with self._condition:
+            self._frame = frame
+            self._sequence += 1
+            self._condition.notify_all()
+
+    def _wait_to_retry(self) -> bool:
+        with self._condition:
+            if self._stopping or self._subscribers == 0:
+                return False
+            self._condition.wait(0.5)
+            return not self._stopping and self._subscribers > 0
+
+    def _start_worker_locked(self) -> None:
+        self._worker = threading.Thread(
+            target=self._run,
+            name="sentinel-mjpeg-upstream",
+            daemon=True,
+        )
+        self._worker.start()
+
+    def _run(self) -> None:
+        LOG.info("shared MJPEG upstream starting: %s", self.url)
+        try:
+            while not self._should_stop_upstream():
+                try:
+                    self._copy_upstream_frames()
+                except requests.RequestException as exc:
+                    if not self._should_stop_upstream():
+                        LOG.warning("shared MJPEG upstream unavailable: %s", exc)
+                if self._should_stop_upstream() or not self._wait_to_retry():
+                    break
+        finally:
+            with self._condition:
+                self._worker = None
+                if self._subscribers > 0 and not self._stopping:
+                    self._frame = None
+                    self._start_worker_locked()
+                self._condition.notify_all()
+            LOG.info("shared MJPEG upstream stopped")
+
+    def _copy_upstream_frames(self) -> None:
+        timeout = (self.connect_timeout, max(5.0, self.request_timeout))
+        with requests.get(self.url, stream=True, timeout=timeout) as response:
+            response.raise_for_status()
+            response.raw.decode_content = False
+            buffer = bytearray()
+            for chunk in response.iter_content(chunk_size=MJPEG_READ_CHUNK_SIZE):
+                if self._should_stop_upstream():
+                    return
+                if not chunk:
+                    continue
+                buffer.extend(chunk)
+                while True:
+                    start = buffer.find(JPEG_START)
+                    if start < 0:
+                        if len(buffer) > 1:
+                            del buffer[:-1]
+                        break
+                    if start:
+                        del buffer[:start]
+                    end = buffer.find(JPEG_END, len(JPEG_START))
+                    if end < 0:
+                        if len(buffer) > MAX_MJPEG_BUFFER:
+                            LOG.warning("discarding oversized MJPEG frame buffer")
+                            buffer.clear()
+                        break
+                    frame_end = end + len(JPEG_END)
+                    self._publish(bytes(buffer[:frame_end]))
+                    del buffer[:frame_end]
+
+
 def with_request_path(base_url: str, path: str, query: str) -> str:
     parsed = urlsplit(base_url)
     prefix = parsed.path.rstrip("/")
@@ -158,7 +305,16 @@ class RelayHTTPServer(ThreadingHTTPServer):
 
     def __init__(self, server_address: tuple[str, int], settings: RelaySettings):
         self.settings = settings
+        self.shared_stream = SharedMjpegStream(
+            settings.stream_url,
+            settings.connect_timeout,
+            settings.request_timeout,
+        )
         super().__init__(server_address, RelayRequestHandler)
+
+    def server_close(self) -> None:
+        self.shared_stream.close()
+        super().server_close()
 
     def handle_error(self, request: object, client_address: tuple[str, int]) -> None:
         error = sys.exc_info()[1]
@@ -206,9 +362,74 @@ class RelayRequestHandler(BaseHTTPRequestHandler):
         if self.command != "HEAD":
             self.wfile.write(body)
 
+    def relay_shared_stream(self) -> None:
+        if self.command == "HEAD":
+            self.send_response(HTTPStatus.OK)
+            self.send_header(
+                "Content-Type",
+                f"multipart/x-mixed-replace; boundary={MJPEG_BOUNDARY}",
+            )
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            return
+
+        shared_stream = self.relay_server.shared_stream
+        sequence = shared_stream.subscribe()
+        response_started = False
+        try:
+            first_frame = shared_stream.frame_after(
+                sequence,
+                max(5.0, self.relay_server.settings.connect_timeout + 2.0),
+            )
+            if first_frame is None:
+                self.send_json_error(
+                    HTTPStatus.BAD_GATEWAY,
+                    "stream upstream unavailable",
+                )
+                return
+
+            self.send_response(HTTPStatus.OK)
+            self.send_header(
+                "Content-Type",
+                f"multipart/x-mixed-replace; boundary={MJPEG_BOUNDARY}",
+            )
+            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+            self.send_header("Pragma", "no-cache")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.close_connection = True
+            response_started = True
+
+            frame_timeout = max(10.0, self.relay_server.settings.request_timeout)
+            current = first_frame
+            while current is not None:
+                sequence, frame = current
+                header = (
+                    f"--{MJPEG_BOUNDARY}\r\n"
+                    "Content-Type: image/jpeg\r\n"
+                    f"Content-Length: {len(frame)}\r\n\r\n"
+                ).encode("ascii")
+                self.wfile.write(header)
+                self.wfile.write(frame)
+                self.wfile.write(b"\r\n")
+                self.wfile.flush()
+                current = shared_stream.frame_after(sequence, frame_timeout)
+        except (BrokenPipeError, ConnectionResetError):
+            LOG.debug("stream client disconnected")
+        except OSError as exc:
+            if response_started:
+                LOG.debug("stream client connection ended: %s", exc)
+            else:
+                raise
+        finally:
+            shared_stream.unsubscribe()
+
     def proxy_request(self) -> None:
         parsed = urlsplit(self.path)
         target = relay_target(self.relay_server.settings, parsed.path, parsed.query)
+        if target.kind == "stream" and self.command in {"GET", "HEAD"}:
+            self.relay_shared_stream()
+            return
         try:
             body = self.read_request_body()
         except ValueError as exc:

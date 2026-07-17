@@ -10,7 +10,9 @@ USB camera -> Raspberry Pi ustreamer -> trusted LAN -> relay host -> Tailscale H
 
 The relay sends `/stream` and `/snapshot` straight to the Pi over the LAN. Dashboard pages, controls, health, motion history, and retained events continue to come from the Pi dashboard, so displayed system state still describes the Pi.
 
-The relay copies the original MJPEG and JPEG bytes. It does not resize or re-encode them, so resolution, quality, and frame rate remain controlled by `ustreamer` on the Pi.
+The relay fans all `/stream` viewers out from one lazy upstream MJPEG connection to the Pi. It releases that connection shortly after the last viewer disconnects, so background tabs and multiple devices cannot multiply Pi stream work.
+
+The relay preserves the original JPEG frame bytes. It does not resize or re-encode them, so resolution, quality, and frame rate remain controlled by `ustreamer` on the Pi.
 
 ## Install
 

@@ -13,7 +13,7 @@ This project is intentionally small: no cloud camera account, no public port for
 - Reviews captures continuously with keyboard navigation and automatic archive paging.
 - Uses lightweight in-memory gallery thumbnails and lazy dashboard initialization for fast remote access.
 - Optionally exposes the feed privately through Tailscale Serve.
-- Can move sustained Tailscale streaming to a more capable relay host without re-encoding camera frames.
+- Can move sustained Tailscale streaming to a more capable relay host, sharing one Pi connection across every viewer without re-encoding camera frames.
 - Watches snapshots for motion using frame differencing.
 - Supports dashboard-drawn ignored areas for excluding noisy motion zones.
 - Sends Telegram photo alerts on motion.
