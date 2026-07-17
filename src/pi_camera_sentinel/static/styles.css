@@ -309,7 +309,8 @@ main {
   background: var(--viewer);
 }
 
-.stream-shell img {
+.stream-shell img,
+.stream-shell canvas {
   grid-area: 1 / 1;
   display: block;
   width: 100%;
@@ -326,11 +327,11 @@ main {
   transition: opacity 160ms ease;
 }
 
-.stream-shell[data-state="live"] .stream-live {
+.stream-shell[data-has-frame="true"] .stream-live {
   opacity: 1;
 }
 
-.stream-shell[data-state="live"] .stream-fallback {
+.stream-shell[data-has-frame="true"] .stream-fallback {
   opacity: 0;
 }
 

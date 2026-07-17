@@ -140,7 +140,7 @@ For a Pi that becomes thermally limited while serving MJPEG through Tailscale, i
 The `pi-camera-sentinel serve` command provides a small same-origin web app on port `8090`. It includes:
 
 - live, pause, reconnect, snapshot, and fullscreen controls
-- pause-aware automatic stream retries with visible reconnect status
+- a frame-verified canvas live view with pause-aware retries and visible reconnect status
 - current frame age, resolution, dropped-frame count, and exposure level
 - camera, live Raspberry Pi power flags, temperature, uptime, and storage status
 - motion-alert and exposure-recovery state with pause and resume toggles
@@ -192,7 +192,7 @@ SENTINEL_RECOVERY_COOLDOWN_SECONDS=120
 
 A failed HTTP request, non-image or empty response, explicit ustreamer offline signal, or frame timestamp older than the stale limit counts as a failure. Identical pixels do not count as stale, so a still scene cannot cause a restart loop. Recovery state, restart totals, and the 20 most recent incidents are stored atomically in `SENTINEL_RECOVERY_STATE_FILE` and displayed in the dashboard. The dashboard also provides a guarded **Restart feed** action for immediate intervention.
 
-Open dashboard tabs recover separately from the Pi watchdog. An interrupted browser stream retries after 1, 2, 4, 8, 16, and then at most 30 seconds. It reconnects immediately when the status API or browser reports recovery, and refreshes after a tab has been hidden for at least 15 seconds. Pausing the live view cancels and suppresses retries until it is resumed.
+Open dashboard tabs recover separately from the Pi watchdog. The browser reads complete JPEG frames into a canvas instead of relying on its native endless-MJPEG image renderer. If no frame is successfully drawn for five seconds, the connection is rebuilt with a bounded delay of at most eight seconds while the last complete frame remains visible. Hidden tabs release their stream and reconnect when visible again. Pausing the live view cancels and suppresses retries until it is resumed.
 
 Enable operational Telegram updates for automatic restart attempts and their eventual recovery with:
 

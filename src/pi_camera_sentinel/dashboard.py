@@ -1086,7 +1086,7 @@ class DashboardRequestHandler(BaseHTTPRequestHandler):
         self.send_header("X-Frame-Options", "DENY")
         self.send_header(
             "Content-Security-Policy",
-            "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; "
+            "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; script-src 'self'; "
             "connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
         )
         super().end_headers()

@@ -5,6 +5,8 @@ Pi Camera Sentinel keeps the live camera on the shortest path and moves secondar
 ## Browser Fast Path
 
 - The live stream and core health status start immediately.
+- Complete MJPEG frames are decoded into a canvas, which gives the browser an explicit rendered-frame heartbeat and avoids native endless-image failures.
+- Intermediate frames are dropped if decoding falls behind, keeping the newest complete frame authoritative without building a client-side queue.
 - Monitoring loads when it approaches the viewport; motion masks, camera tuning, and event history initialize independently when they are near view.
 - Background polling stops while the page is hidden and refreshes initialized sections when the page returns.
 - API requests have a fixed timeout and periodic status requests cannot overlap themselves.

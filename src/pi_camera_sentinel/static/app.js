@@ -117,9 +117,14 @@ const viewState = {
   servicesBusy: false,
   serviceStates: {},
   statusBusy: false,
+  streamAbortController: null,
   streamFeedOnline: null,
+  streamGeneration: 0,
+  streamLastRenderedAt: null,
   streamLoaded: false,
+  streamPendingFrame: null,
   streamStartedAt: null,
+  streamRendering: false,
   streamReconnectAttempt: 0,
   streamReconnectTimer: null,
   webhookBusy: false,
@@ -175,6 +180,8 @@ const clockTime = new Intl.DateTimeFormat(undefined, { timeStyle: "medium" });
 const streamReconnectBaseMs = 750;
 const streamReconnectMaxMs = 8000;
 const streamConnectTimeoutMs = 10000;
+const streamFrameTimeoutMs = 5000;
+const streamMaxBufferBytes = 8 * 1024 * 1024;
 const requestTimeoutMs = 10000;
 const deferredSectionMargin = "600px 0px";
 
@@ -283,8 +290,28 @@ function refreshStreamFallback() {
   image.src = `/snapshot?t=${Date.now()}`;
 }
 
-function markStreamReady(stream) {
-  if (stream !== elements.stream || viewState.paused || document.hidden) return;
+function setStreamDiagnostic(phase, error = "") {
+  elements.streamShell.dataset.streamPhase = phase;
+  if (error) {
+    elements.streamShell.dataset.streamError = error.slice(0, 240);
+  } else {
+    delete elements.streamShell.dataset.streamError;
+  }
+}
+
+function stopStreamRequest() {
+  const controller = viewState.streamAbortController;
+  viewState.streamAbortController = null;
+  if (controller !== null) controller.abort();
+}
+
+function markStreamReady(generation) {
+  if (
+    generation !== viewState.streamGeneration
+    || viewState.streamAbortController === null
+    || viewState.paused
+    || document.hidden
+  ) return;
   clearStreamReconnect();
   viewState.streamReconnectAttempt = 0;
   viewState.streamLoaded = true;
@@ -294,34 +321,165 @@ function markStreamReady(stream) {
   if (!elements.streamFallback.src) refreshStreamFallback();
 }
 
-function replaceStreamElement() {
-  const previous = elements.stream;
-  const replacement = previous.cloneNode(false);
-  replacement.removeAttribute("src");
-  previous.replaceWith(replacement);
-  elements.stream = replacement;
-  replacement.addEventListener("load", () => {
-    markStreamReady(replacement);
+function jpegMarkerIndex(bytes, first, second, startAt = 0) {
+  for (let index = startAt; index < bytes.length - 1; index += 1) {
+    if (bytes[index] === first && bytes[index + 1] === second) return index;
+  }
+  return -1;
+}
+
+function appendStreamBytes(buffer, chunk) {
+  const merged = new Uint8Array(buffer.length + chunk.length);
+  merged.set(buffer);
+  merged.set(chunk, buffer.length);
+  return merged;
+}
+
+function decodeStreamFrame(bytes) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(new Blob([bytes], { type: "image/jpeg" }));
+    const image = new Image();
+    image.addEventListener("load", () => resolve({ image, url }), { once: true });
+    image.addEventListener("error", () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Camera returned an invalid JPEG frame"));
+    }, { once: true });
+    image.src = url;
   });
-  replacement.addEventListener("error", () => {
-    if (replacement !== elements.stream) return;
+}
+
+async function renderPendingStreamFrames() {
+  if (viewState.streamRendering) return;
+  viewState.streamRendering = true;
+  try {
+    while (viewState.streamPendingFrame !== null) {
+      const pending = viewState.streamPendingFrame;
+      viewState.streamPendingFrame = null;
+      let decoded = null;
+      try {
+        decoded = await decodeStreamFrame(pending.bytes);
+        if (pending.generation !== viewState.streamGeneration) continue;
+        if (
+          elements.stream.width !== decoded.image.naturalWidth
+          || elements.stream.height !== decoded.image.naturalHeight
+        ) {
+          elements.stream.width = decoded.image.naturalWidth;
+          elements.stream.height = decoded.image.naturalHeight;
+        }
+        const context = elements.stream.getContext("2d", { alpha: false });
+        if (context === null) throw new Error("Canvas 2D rendering is unavailable");
+        context.drawImage(decoded.image, 0, 0, elements.stream.width, elements.stream.height);
+        viewState.streamLastRenderedAt = Date.now();
+        elements.streamShell.dataset.hasFrame = "true";
+        setStreamDiagnostic("live");
+        markStreamReady(pending.generation);
+      } catch (error) {
+        if (pending.generation === viewState.streamGeneration) {
+          setStreamDiagnostic("decode-error", error.message);
+        }
+        // A single damaged JPEG should not discard an otherwise healthy stream.
+      } finally {
+        if (decoded !== null) URL.revokeObjectURL(decoded.url);
+      }
+    }
+  } finally {
+    viewState.streamRendering = false;
+    if (viewState.streamPendingFrame !== null) renderPendingStreamFrames();
+  }
+}
+
+function queueStreamFrame(bytes, generation) {
+  if (generation !== viewState.streamGeneration) return;
+  setStreamDiagnostic("frame-received");
+  viewState.streamPendingFrame = { bytes, generation };
+  renderPendingStreamFrames();
+}
+
+function extractStreamFrames(buffer, chunk, generation) {
+  let pending = appendStreamBytes(buffer, chunk);
+  while (pending.length > 0) {
+    const start = jpegMarkerIndex(pending, 0xff, 0xd8);
+    if (start < 0) {
+      return pending[pending.length - 1] === 0xff ? pending.slice(-1) : new Uint8Array(0);
+    }
+    const end = jpegMarkerIndex(pending, 0xff, 0xd9, start + 2);
+    if (end < 0) {
+      pending = pending.slice(start);
+      if (pending.length > streamMaxBufferBytes) {
+        throw new Error("Camera frame exceeded the stream buffer limit");
+      }
+      return pending;
+    }
+    queueStreamFrame(pending.slice(start, end + 2), generation);
+    pending = pending.slice(end + 2);
+  }
+  return pending;
+}
+
+async function consumeStream(generation, controller) {
+  let reader = null;
+  try {
+    const response = await fetch(
+      `/stream?advance_headers=1&dual_final_frames=1&t=${Date.now()}`,
+      {
+        cache: "no-store",
+        headers: { Accept: "multipart/x-mixed-replace" },
+        signal: controller.signal,
+      },
+    );
+    if (!response.ok || response.body === null) {
+      throw new Error(`Camera stream returned HTTP ${response.status}`);
+    }
+    setStreamDiagnostic("reading");
+    reader = response.body.getReader();
+    let buffer = new Uint8Array(0);
+    while (generation === viewState.streamGeneration) {
+      const result = await reader.read();
+      if (result.done) throw new Error("Camera stream ended");
+      buffer = extractStreamFrames(buffer, result.value, generation);
+    }
+  } catch (error) {
+    if (
+      generation !== viewState.streamGeneration
+      || viewState.streamAbortController !== controller
+      || controller.signal.aborted
+      || viewState.paused
+      || document.hidden
+    ) return;
+    viewState.streamAbortController = null;
     viewState.streamLoaded = false;
-    if (!viewState.paused) scheduleStreamReconnect("Camera stream interrupted");
-  });
-  return replacement;
+    setStreamDiagnostic("stream-error", error.message);
+    scheduleStreamReconnect("Camera stream interrupted");
+  } finally {
+    if (reader !== null) {
+      try {
+        await reader.cancel();
+      } catch (_error) {
+        // The reader is commonly already closed after a network interruption.
+      }
+    }
+  }
 }
 
 function startStream({ resetBackoff = true, message = "Connecting to camera" } = {}) {
   clearStreamReconnect();
+  stopStreamRequest();
+  viewState.streamGeneration += 1;
+  const generation = viewState.streamGeneration;
   if (resetBackoff) viewState.streamReconnectAttempt = 0;
   viewState.paused = false;
+  viewState.streamLastRenderedAt = null;
   viewState.streamLoaded = false;
+  viewState.streamPendingFrame = null;
   viewState.streamStartedAt = Date.now();
   elements.pauseButton.textContent = "Pause";
   elements.streamShell.dataset.state = "connecting";
+  setStreamDiagnostic("connecting");
   showStreamNotice(message);
   refreshStreamFallback();
-  replaceStreamElement().src = `/stream?advance_headers=1&dual_final_frames=1&t=${Date.now()}`;
+  const controller = new AbortController();
+  viewState.streamAbortController = controller;
+  consumeStream(generation, controller);
 }
 
 function scheduleStreamReconnect(message, { immediate = false } = {}) {
@@ -332,6 +490,9 @@ function scheduleStreamReconnect(message, { immediate = false } = {}) {
   } else if (viewState.streamReconnectTimer !== null) {
     return;
   }
+  stopStreamRequest();
+  viewState.streamLoaded = false;
+  viewState.streamStartedAt = null;
   if (!navigator.onLine) {
     elements.streamShell.dataset.state = "offline";
     showStreamNotice("Network offline / waiting to reconnect");
@@ -356,28 +517,27 @@ function scheduleStreamReconnect(message, { immediate = false } = {}) {
 
 function pauseStream() {
   clearStreamReconnect();
+  stopStreamRequest();
+  viewState.streamGeneration += 1;
   viewState.streamReconnectAttempt = 0;
   viewState.paused = true;
   viewState.streamLoaded = false;
   viewState.streamStartedAt = null;
+  viewState.streamLastRenderedAt = null;
+  viewState.streamPendingFrame = null;
   elements.pauseButton.textContent = "Resume";
   elements.streamShell.dataset.state = "paused";
   refreshStreamFallback();
-  replaceStreamElement();
   showStreamNotice("Live view paused");
 }
 
 function inspectStreamHealth() {
   if (viewState.paused || document.hidden || viewState.streamReconnectTimer !== null) return;
-  if (elements.stream.naturalWidth > 0 && elements.stream.naturalHeight > 0) {
-    if (!viewState.streamLoaded) markStreamReady(elements.stream);
-    return;
-  }
-  if (
-    viewState.streamStartedAt !== null
-    && Date.now() - viewState.streamStartedAt >= streamConnectTimeoutMs
-  ) {
+  const freshnessStartedAt = viewState.streamLastRenderedAt ?? viewState.streamStartedAt;
+  const timeout = viewState.streamLoaded ? streamFrameTimeoutMs : streamConnectTimeoutMs;
+  if (freshnessStartedAt !== null && Date.now() - freshnessStartedAt >= timeout) {
     viewState.streamLoaded = false;
+    setStreamDiagnostic("stalled", "No complete frame was drawn before the freshness deadline");
     scheduleStreamReconnect("Live view interrupted");
   }
 }
@@ -1537,10 +1697,13 @@ document.addEventListener("fullscreenchange", () => {
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
     clearStreamReconnect();
+    stopStreamRequest();
+    viewState.streamGeneration += 1;
     viewState.streamLoaded = false;
     viewState.streamStartedAt = null;
+    viewState.streamLastRenderedAt = null;
+    viewState.streamPendingFrame = null;
     refreshStreamFallback();
-    replaceStreamElement();
     return;
   }
   if (!viewState.paused) {
@@ -1559,8 +1722,13 @@ document.addEventListener("visibilitychange", () => {
 });
 window.addEventListener("offline", () => {
   clearStreamReconnect();
+  stopStreamRequest();
+  viewState.streamGeneration += 1;
   viewState.streamFeedOnline = false;
   viewState.streamLoaded = false;
+  viewState.streamStartedAt = null;
+  viewState.streamLastRenderedAt = null;
+  viewState.streamPendingFrame = null;
   elements.streamShell.dataset.state = "offline";
   showStreamNotice("Network offline / waiting to reconnect");
 });

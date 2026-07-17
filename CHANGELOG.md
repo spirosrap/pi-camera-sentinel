@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.16.1 - 2026-07-17
+
+- Replace the browser's unreliable native MJPEG image renderer with a streamed JPEG canvas renderer.
+- Measure each successfully drawn frame so stalled or failed rendering can never remain falsely Live.
+- Preserve the last complete canvas frame during reconnects without exposing a broken-image surface.
+- Abort and rebuild streams that do not draw a fresh frame within five seconds.
+- Permit image-only `blob:` URLs in the dashboard security policy for isolated JPEG decoding.
+- Expose non-visible renderer phase diagnostics for live troubleshooting.
+
 ## 1.15.1 - 2026-07-17
 
 - Reconnect a stalled Pi MJPEG upstream without closing attached browser streams.

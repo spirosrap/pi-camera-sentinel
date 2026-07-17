@@ -6,8 +6,8 @@
     <meta name="theme-color" content="#171a18">
     <meta name="color-scheme" content="light">
     <title>Pi Camera Sentinel</title>
-    <link rel="stylesheet" href="/assets/styles.css?v=1.15.1">
-    <script src="/assets/app.js?v=1.15.1" defer></script>
+    <link rel="stylesheet" href="/assets/styles.css?v=1.16.1">
+    <script src="/assets/app.js?v=1.16.1" defer></script>
   </head>
   <body>
     <header class="topbar">
@@ -17,7 +17,7 @@
           <span class="brand-kicker">Private camera</span>
           <span class="brand-name-row">
             <strong id="app-title">Pi Camera Sentinel</strong>
-            <span class="app-version" id="app-version">v1.15.1</span>
+            <span class="app-version" id="app-version">v1.16.1</span>
           </span>
         </span>
       </a>
@@ -49,9 +49,9 @@
           </div>
         </div>
 
-        <div class="stream-shell" id="stream-shell" data-state="connecting">
+        <div class="stream-shell" id="stream-shell" data-state="connecting" data-has-frame="false">
           <img class="stream-fallback" id="camera-fallback" alt="" aria-hidden="true">
-          <img class="stream-live" id="camera-stream" alt="Live Pi camera feed" decoding="async" fetchpriority="high">
+          <canvas class="stream-live" id="camera-stream" width="1280" height="720" role="img" aria-label="Live Pi camera feed"></canvas>
           <div class="stream-notice" id="stream-notice" role="status" aria-live="polite">Connecting to camera</div>
         </div>
 

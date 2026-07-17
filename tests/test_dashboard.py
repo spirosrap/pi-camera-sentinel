@@ -403,6 +403,7 @@ def test_motion_zone_editor_is_a_dedicated_no_cache_page(dashboard_server):
     editor = requests.get(f"{base_url}/motion-zones", timeout=2)
 
     assert dashboard.status_code == 200
+    assert "img-src 'self' data: blob:" in dashboard.headers["Content-Security-Policy"]
     assert 'href="/motion-zones"' in dashboard.text
     assert 'id="motion-mask-canvas"' not in dashboard.text
     assert editor.status_code == 200
@@ -421,8 +422,11 @@ def test_dashboard_stream_has_a_latest_frame_fallback(dashboard_server):
 
     assert dashboard.status_code == 200
     assert 'id="camera-fallback"' in dashboard.text
-    assert 'class="stream-live" id="camera-stream"' in dashboard.text
+    assert '<canvas class="stream-live" id="camera-stream"' in dashboard.text
+    assert 'data-has-frame="false"' in dashboard.text
     assert "function inspectStreamHealth()" in script.text
+    assert "async function consumeStream(" in script.text
+    assert "function extractStreamFrames(" in script.text
     assert "refreshStreamFallback();" in script.text
     assert "Latest frame retained / waiting for camera" in script.text
 
