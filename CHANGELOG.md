@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.15.1 - 2026-07-17
+
+- Reconnect a stalled Pi MJPEG upstream without closing attached browser streams.
+- Detect failed browser image connections independently of healthy dashboard snapshots.
+- Keep the latest camera snapshot visible while the live view reconnects instead of exposing a black broken-image state.
+- Replace raw transport errors in the viewer with a concise latest-frame status.
+- Retry interrupted live views within eight seconds and reconnect cleanly when a hidden tab returns.
+- Add integration coverage for a viewer surviving an upstream camera disconnect.
+
 ## 1.14.0 - 2026-07-17
 
 - Fan every relay viewer out from one shared Pi MJPEG connection instead of opening one Pi stream per browser tab.

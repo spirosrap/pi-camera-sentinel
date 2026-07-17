@@ -75,6 +75,8 @@ class RelaySettings:
     snapshot_url: str
     connect_timeout: float = 5.0
     request_timeout: float = 30.0
+    stream_read_timeout: float = 10.0
+    stream_client_timeout: float = 90.0
 
     @classmethod
     def from_env(cls) -> "RelaySettings":
@@ -101,6 +103,14 @@ class RelaySettings:
                 os.environ.get("SENTINEL_RELAY_REQUEST_TIMEOUT", "30"),
                 "SENTINEL_RELAY_REQUEST_TIMEOUT",
             ),
+            stream_read_timeout=positive_float(
+                os.environ.get("SENTINEL_RELAY_STREAM_READ_TIMEOUT", "10"),
+                "SENTINEL_RELAY_STREAM_READ_TIMEOUT",
+            ),
+            stream_client_timeout=positive_float(
+                os.environ.get("SENTINEL_RELAY_STREAM_CLIENT_TIMEOUT", "90"),
+                "SENTINEL_RELAY_STREAM_CLIENT_TIMEOUT",
+            ),
         )
 
 
@@ -117,12 +127,12 @@ class SharedMjpegStream:
         self,
         url: str,
         connect_timeout: float,
-        request_timeout: float,
+        read_timeout: float,
         idle_timeout: float = 3.0,
     ):
         self.url = url
         self.connect_timeout = connect_timeout
-        self.request_timeout = request_timeout
+        self.read_timeout = read_timeout
         self.idle_timeout = idle_timeout
         self._condition = threading.Condition()
         self._frame: bytes | None = None
@@ -220,7 +230,7 @@ class SharedMjpegStream:
             LOG.info("shared MJPEG upstream stopped")
 
     def _copy_upstream_frames(self) -> None:
-        timeout = (self.connect_timeout, max(5.0, self.request_timeout))
+        timeout = (self.connect_timeout, self.read_timeout)
         with requests.get(self.url, stream=True, timeout=timeout) as response:
             response.raise_for_status()
             response.raw.decode_content = False
@@ -308,7 +318,7 @@ class RelayHTTPServer(ThreadingHTTPServer):
         self.shared_stream = SharedMjpegStream(
             settings.stream_url,
             settings.connect_timeout,
-            settings.request_timeout,
+            settings.stream_read_timeout,
         )
         super().__init__(server_address, RelayRequestHandler)
 
@@ -379,7 +389,11 @@ class RelayRequestHandler(BaseHTTPRequestHandler):
         try:
             first_frame = shared_stream.frame_after(
                 sequence,
-                max(5.0, self.relay_server.settings.connect_timeout + 2.0),
+                max(
+                    10.0,
+                    self.relay_server.settings.connect_timeout
+                    + self.relay_server.settings.stream_read_timeout,
+                ),
             )
             if first_frame is None:
                 self.send_json_error(
@@ -400,7 +414,7 @@ class RelayRequestHandler(BaseHTTPRequestHandler):
             self.close_connection = True
             response_started = True
 
-            frame_timeout = max(10.0, self.relay_server.settings.request_timeout)
+            frame_timeout = self.relay_server.settings.stream_client_timeout
             current = first_frame
             while current is not None:
                 sequence, frame = current

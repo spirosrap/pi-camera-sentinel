@@ -413,6 +413,20 @@ def test_motion_zone_editor_is_a_dedicated_no_cache_page(dashboard_server):
     assert 'id="camera-stream"' not in editor.text
 
 
+def test_dashboard_stream_has_a_latest_frame_fallback(dashboard_server):
+    base_url, _settings = dashboard_server
+
+    dashboard = requests.get(f"{base_url}/", timeout=2)
+    script = requests.get(f"{base_url}/assets/app.js?v=test", timeout=2)
+
+    assert dashboard.status_code == 200
+    assert 'id="camera-fallback"' in dashboard.text
+    assert 'class="stream-live" id="camera-stream"' in dashboard.text
+    assert "function inspectStreamHealth()" in script.text
+    assert "refreshStreamFallback();" in script.text
+    assert "Latest frame retained / waiting for camera" in script.text
+
+
 def test_client_disconnect_is_not_reclassified_as_policy_failure():
     handler = object.__new__(DashboardRequestHandler)
 

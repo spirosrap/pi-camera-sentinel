@@ -76,6 +76,7 @@ const elements = {
   snapshotButton: document.querySelector("#snapshot-button"),
   storageDetail: document.querySelector("#storage-detail"),
   storageValue: document.querySelector("#storage-value"),
+  streamFallback: document.querySelector("#camera-fallback"),
   stream: document.querySelector("#camera-stream"),
   streamNotice: document.querySelector("#stream-notice"),
   streamShell: document.querySelector("#stream-shell"),
@@ -117,8 +118,8 @@ const viewState = {
   serviceStates: {},
   statusBusy: false,
   streamFeedOnline: null,
-  streamHiddenAt: null,
   streamLoaded: false,
+  streamStartedAt: null,
   streamReconnectAttempt: 0,
   streamReconnectTimer: null,
   webhookBusy: false,
@@ -171,9 +172,9 @@ const activityTime = new Intl.DateTimeFormat(undefined, { hour: "numeric", minut
 const activityDay = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
 const activityWeekday = new Intl.DateTimeFormat(undefined, { weekday: "short" });
 const clockTime = new Intl.DateTimeFormat(undefined, { timeStyle: "medium" });
-const streamReconnectBaseMs = 1000;
-const streamReconnectMaxMs = 30000;
-const streamVisibilityReconnectMs = 15000;
+const streamReconnectBaseMs = 750;
+const streamReconnectMaxMs = 8000;
+const streamConnectTimeoutMs = 10000;
 const requestTimeoutMs = 10000;
 const deferredSectionMargin = "600px 0px";
 
@@ -274,6 +275,25 @@ function streamReconnectDelay(attempt) {
   return Math.min(streamReconnectBaseMs * (2 ** Math.min(attempt, 5)), streamReconnectMaxMs);
 }
 
+function refreshStreamFallback() {
+  const image = new Image();
+  image.addEventListener("load", () => {
+    elements.streamFallback.src = image.src;
+  }, { once: true });
+  image.src = `/snapshot?t=${Date.now()}`;
+}
+
+function markStreamReady(stream) {
+  if (stream !== elements.stream || viewState.paused || document.hidden) return;
+  clearStreamReconnect();
+  viewState.streamReconnectAttempt = 0;
+  viewState.streamLoaded = true;
+  viewState.streamStartedAt = null;
+  elements.streamShell.dataset.state = "live";
+  hideStreamNotice();
+  if (!elements.streamFallback.src) refreshStreamFallback();
+}
+
 function replaceStreamElement() {
   const previous = elements.stream;
   const replacement = previous.cloneNode(false);
@@ -281,14 +301,7 @@ function replaceStreamElement() {
   previous.replaceWith(replacement);
   elements.stream = replacement;
   replacement.addEventListener("load", () => {
-    if (replacement !== elements.stream) return;
-    clearStreamReconnect();
-    viewState.streamReconnectAttempt = 0;
-    viewState.streamLoaded = true;
-    if (!viewState.paused) {
-      elements.streamShell.dataset.state = "live";
-      hideStreamNotice();
-    }
+    markStreamReady(replacement);
   });
   replacement.addEventListener("error", () => {
     if (replacement !== elements.stream) return;
@@ -303,9 +316,11 @@ function startStream({ resetBackoff = true, message = "Connecting to camera" } =
   if (resetBackoff) viewState.streamReconnectAttempt = 0;
   viewState.paused = false;
   viewState.streamLoaded = false;
+  viewState.streamStartedAt = Date.now();
   elements.pauseButton.textContent = "Pause";
   elements.streamShell.dataset.state = "connecting";
   showStreamNotice(message);
+  refreshStreamFallback();
   replaceStreamElement().src = `/stream?advance_headers=1&dual_final_frames=1&t=${Date.now()}`;
 }
 
@@ -322,6 +337,8 @@ function scheduleStreamReconnect(message, { immediate = false } = {}) {
     showStreamNotice("Network offline / waiting to reconnect");
     return;
   }
+
+  refreshStreamFallback();
 
   const delay = immediate ? 0 : streamReconnectDelay(viewState.streamReconnectAttempt);
   if (!immediate) viewState.streamReconnectAttempt += 1;
@@ -341,10 +358,28 @@ function pauseStream() {
   clearStreamReconnect();
   viewState.streamReconnectAttempt = 0;
   viewState.paused = true;
+  viewState.streamLoaded = false;
+  viewState.streamStartedAt = null;
   elements.pauseButton.textContent = "Resume";
   elements.streamShell.dataset.state = "paused";
-  elements.stream.src = `/snapshot?t=${Date.now()}`;
+  refreshStreamFallback();
+  replaceStreamElement();
   showStreamNotice("Live view paused");
+}
+
+function inspectStreamHealth() {
+  if (viewState.paused || document.hidden || viewState.streamReconnectTimer !== null) return;
+  if (elements.stream.naturalWidth > 0 && elements.stream.naturalHeight > 0) {
+    if (!viewState.streamLoaded) markStreamReady(elements.stream);
+    return;
+  }
+  if (
+    viewState.streamStartedAt !== null
+    && Date.now() - viewState.streamStartedAt >= streamConnectTimeoutMs
+  ) {
+    viewState.streamLoaded = false;
+    scheduleStreamReconnect("Live view interrupted");
+  }
 }
 
 function togglePause() {
@@ -421,7 +456,9 @@ function renderStatus(status) {
     const age = feed.frame_age_seconds == null ? "" : ` / ${feed.frame_age_seconds.toFixed(1)}s old`;
     elements.frameStatus.textContent = `${dateTime.format(captured)}${age}`;
   } else {
-    elements.frameStatus.textContent = feed.error || "Frame timestamp unavailable";
+    elements.frameStatus.textContent = feed.error
+      ? "Latest frame retained / waiting for camera"
+      : "Waiting for the first camera frame";
   }
 
   if (warnings.length) {
@@ -1499,12 +1536,14 @@ document.addEventListener("fullscreenchange", () => {
 });
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
-    viewState.streamHiddenAt = Date.now();
+    clearStreamReconnect();
+    viewState.streamLoaded = false;
+    viewState.streamStartedAt = null;
+    refreshStreamFallback();
+    replaceStreamElement();
     return;
   }
-  const hiddenFor = viewState.streamHiddenAt == null ? 0 : Date.now() - viewState.streamHiddenAt;
-  viewState.streamHiddenAt = null;
-  if (!viewState.paused && (hiddenFor >= streamVisibilityReconnectMs || !viewState.streamLoaded)) {
+  if (!viewState.paused) {
     startStream({ message: "Refreshing live view" });
   }
   refreshStatus();
@@ -1539,6 +1578,7 @@ runWhenNear(elements.monitoringSection, initializeMonitoring);
 runWhenNear(elements.tuningSection, initializeCameraTuning);
 runWhenNear(elements.eventsSection, initializeEvents);
 updateClock();
+setInterval(inspectStreamHealth, 1000);
 setInterval(() => {
   if (!document.hidden) refreshStatus();
 }, 10000);

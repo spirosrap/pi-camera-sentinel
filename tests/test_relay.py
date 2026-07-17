@@ -83,6 +83,40 @@ class CameraHandler(BaseHTTPRequestHandler):
         pass
 
 
+class RecoveringCameraHandler(BaseHTTPRequestHandler):
+    stream_lock = threading.Lock()
+    stream_requests = 0
+
+    def do_GET(self):
+        with self.stream_lock:
+            type(self).stream_requests += 1
+            generation = type(self).stream_requests
+        self.send_response(200)
+        self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=camera")
+        self.end_headers()
+        frame = (
+            b"\xff\xd8"
+            + f"generation-{generation}:".encode()
+            + (b"x" * 8192)
+            + b"\xff\xd9"
+        )
+        part = (
+            b"--camera\r\nContent-Type: image/jpeg\r\nContent-Length: "
+            + str(len(frame)).encode()
+            + b"\r\n\r\n"
+            + frame
+            + b"\r\n"
+        )
+        try:
+            self.wfile.write(part)
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
+    def log_message(self, *_args):
+        pass
+
+
 @contextmanager
 def running_server(server):
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -123,6 +157,23 @@ def read_one_frame(response):
     raise AssertionError("stream ended before a JPEG frame arrived")
 
 
+def read_frames(response, count):
+    payload = bytearray()
+    frames = []
+    for chunk in response.iter_content(chunk_size=256):
+        payload.extend(chunk)
+        while len(frames) < count:
+            start = payload.find(b"\xff\xd8")
+            end = payload.find(b"\xff\xd9", start + 2) if start >= 0 else -1
+            if start < 0 or end < 0:
+                break
+            frames.append(bytes(payload[start : end + 2]))
+            del payload[: end + 2]
+        if len(frames) == count:
+            return frames
+    raise AssertionError(f"stream ended after {len(frames)} of {count} JPEG frames")
+
+
 def test_relay_routes_dashboard_and_media_without_reencoding():
     dashboard, camera, relay = relay_stack()
     with running_server(dashboard), running_server(camera), running_server(relay):
@@ -160,6 +211,33 @@ def test_relay_fans_multiple_viewers_out_from_one_camera_stream():
         finally:
             first.close()
             second.close()
+
+
+def test_relay_keeps_viewer_attached_while_camera_stream_reconnects():
+    RecoveringCameraHandler.stream_requests = 0
+    dashboard = ThreadingHTTPServer(("127.0.0.1", 0), DashboardHandler)
+    camera = ThreadingHTTPServer(("127.0.0.1", 0), RecoveringCameraHandler)
+    camera_url = f"http://127.0.0.1:{camera.server_port}"
+    settings = RelaySettings(
+        host="127.0.0.1",
+        port=0,
+        dashboard_url=f"http://127.0.0.1:{dashboard.server_port}",
+        stream_url=f"{camera_url}/stream",
+        snapshot_url=f"{camera_url}/snapshot",
+        connect_timeout=0.5,
+        stream_read_timeout=0.5,
+        stream_client_timeout=3,
+    )
+    relay = RelayHTTPServer((settings.host, settings.port), settings)
+
+    with running_server(dashboard), running_server(camera), running_server(relay):
+        base = f"http://127.0.0.1:{relay.server_port}"
+        with requests.get(f"{base}/stream", timeout=(2, 4), stream=True) as stream:
+            frames = read_frames(stream, 2)
+
+    assert b"generation-1:" in frames[0]
+    assert b"generation-2:" in frames[1]
+    assert RecoveringCameraHandler.stream_requests >= 2
 
 
 def test_relay_rewrites_host_and_origin_for_dashboard_writes():

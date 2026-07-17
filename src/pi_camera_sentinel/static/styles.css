@@ -310,10 +310,28 @@ main {
 }
 
 .stream-shell img {
+  grid-area: 1 / 1;
   display: block;
   width: 100%;
   height: 100%;
   object-fit: contain;
+}
+
+.stream-fallback {
+  opacity: 1;
+}
+
+.stream-live {
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+
+.stream-shell[data-state="live"] .stream-live {
+  opacity: 1;
+}
+
+.stream-shell[data-state="live"] .stream-fallback {
+  opacity: 0;
 }
 
 .stream-notice {
