@@ -11,9 +11,11 @@ import time
 from dataclasses import dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from io import BytesIO
 from urllib.parse import parse_qs, urlsplit, urlunsplit
 
 import requests
+from PIL import Image
 
 
 LOG = logging.getLogger("pi-camera-sentinel.relay")
@@ -35,6 +37,7 @@ HOP_BY_HOP_HEADERS = {
     "upgrade",
 }
 GENERATED_RESPONSE_HEADERS = {"date", "server"}
+REWRITTEN_IMAGE_HEADERS = {"content-encoding", "content-length", "content-md5", "etag"}
 
 
 def positive_float(value: str, name: str) -> float:
@@ -45,6 +48,23 @@ def positive_float(value: str, name: str) -> float:
     if parsed <= 0:
         raise ValueError(f"{name} must be greater than zero")
     return parsed
+
+
+def bounded_float(value: str, name: str, minimum: float, maximum: float) -> float:
+    parsed = positive_float(value, name)
+    if not minimum <= parsed <= maximum:
+        raise ValueError(f"{name} must be between {minimum} and {maximum}")
+    return parsed
+
+
+def jpeg_quality(value: str, name: str = "SENTINEL_RELAY_JPEG_QUALITY") -> int:
+    try:
+        quality = int(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer") from exc
+    if not 1 <= quality <= 100:
+        raise ValueError(f"{name} must be between 1 and 100")
+    return quality
 
 
 def port_number(value: str, name: str = "SENTINEL_RELAY_PORT") -> int:
@@ -78,6 +98,10 @@ class RelaySettings:
     stream_idle_timeout: float = 30.0
     stream_read_timeout: float = 10.0
     stream_client_timeout: float = 90.0
+    red_gain: float = 1.0
+    green_gain: float = 1.0
+    blue_gain: float = 1.0
+    jpeg_quality: int = 90
 
     @classmethod
     def from_env(cls) -> "RelaySettings":
@@ -116,6 +140,27 @@ class RelaySettings:
                 os.environ.get("SENTINEL_RELAY_STREAM_CLIENT_TIMEOUT", "90"),
                 "SENTINEL_RELAY_STREAM_CLIENT_TIMEOUT",
             ),
+            red_gain=bounded_float(
+                os.environ.get("SENTINEL_RELAY_RED_GAIN", "1"),
+                "SENTINEL_RELAY_RED_GAIN",
+                0.25,
+                4.0,
+            ),
+            green_gain=bounded_float(
+                os.environ.get("SENTINEL_RELAY_GREEN_GAIN", "1"),
+                "SENTINEL_RELAY_GREEN_GAIN",
+                0.25,
+                4.0,
+            ),
+            blue_gain=bounded_float(
+                os.environ.get("SENTINEL_RELAY_BLUE_GAIN", "1"),
+                "SENTINEL_RELAY_BLUE_GAIN",
+                0.25,
+                4.0,
+            ),
+            jpeg_quality=jpeg_quality(
+                os.environ.get("SENTINEL_RELAY_JPEG_QUALITY", "90")
+            ),
         )
 
 
@@ -123,6 +168,44 @@ class RelaySettings:
 class RelayTarget:
     url: str
     kind: str
+
+
+@dataclass(frozen=True)
+class JpegColorCorrection:
+    red_gain: float = 1.0
+    green_gain: float = 1.0
+    blue_gain: float = 1.0
+    quality: int = 90
+
+    @property
+    def enabled(self) -> bool:
+        return any(gain != 1.0 for gain in self.gains)
+
+    @property
+    def gains(self) -> tuple[float, float, float]:
+        return self.red_gain, self.green_gain, self.blue_gain
+
+    @staticmethod
+    def gain_table(gain: float) -> tuple[int, ...]:
+        return tuple(min(255, round(value * gain)) for value in range(256))
+
+    def apply(self, frame: bytes) -> bytes:
+        if not self.enabled:
+            return frame
+        try:
+            with Image.open(BytesIO(frame)) as source:
+                image = source.convert("RGB")
+            channels = [
+                channel.point(self.gain_table(gain))
+                for channel, gain in zip(image.split(), self.gains)
+            ]
+            corrected = Image.merge("RGB", channels)
+            output = BytesIO()
+            corrected.save(output, format="JPEG", quality=self.quality, subsampling=2)
+            return output.getvalue()
+        except (OSError, ValueError) as exc:
+            LOG.warning("leaving unreadable JPEG frame uncorrected: %s", exc)
+            return frame
 
 
 class SharedMjpegStream:
@@ -134,11 +217,13 @@ class SharedMjpegStream:
         connect_timeout: float,
         read_timeout: float,
         idle_timeout: float = 3.0,
+        color_correction: JpegColorCorrection | None = None,
     ):
         self.url = url
         self.connect_timeout = connect_timeout
         self.read_timeout = read_timeout
         self.idle_timeout = idle_timeout
+        self.color_correction = color_correction or JpegColorCorrection()
         self._condition = threading.Condition()
         self._frame: bytes | None = None
         self._sequence = 0
@@ -261,7 +346,8 @@ class SharedMjpegStream:
                             buffer.clear()
                         break
                     frame_end = end + len(JPEG_END)
-                    self._publish(bytes(buffer[:frame_end]))
+                    frame = self.color_correction.apply(bytes(buffer[:frame_end]))
+                    self._publish(frame)
                     del buffer[:frame_end]
 
 
@@ -320,11 +406,18 @@ class RelayHTTPServer(ThreadingHTTPServer):
 
     def __init__(self, server_address: tuple[str, int], settings: RelaySettings):
         self.settings = settings
+        self.color_correction = JpegColorCorrection(
+            red_gain=settings.red_gain,
+            green_gain=settings.green_gain,
+            blue_gain=settings.blue_gain,
+            quality=settings.jpeg_quality,
+        )
         self.shared_stream = SharedMjpegStream(
             settings.stream_url,
             settings.connect_timeout,
             settings.stream_read_timeout,
             idle_timeout=settings.stream_idle_timeout,
+            color_correction=self.color_correction,
         )
         super().__init__(server_address, RelayRequestHandler)
 
@@ -444,6 +537,30 @@ class RelayRequestHandler(BaseHTTPRequestHandler):
         finally:
             shared_stream.unsubscribe()
 
+    def relay_corrected_snapshot(self, response: requests.Response, query: str) -> None:
+        frame = self.relay_server.color_correction.apply(response.content)
+        self.send_response(response.status_code)
+        has_content_disposition = False
+        for name, value in response.headers.items():
+            lower = name.lower()
+            if (
+                lower in HOP_BY_HOP_HEADERS
+                or lower in GENERATED_RESPONSE_HEADERS
+                or lower in REWRITTEN_IMAGE_HEADERS
+            ):
+                continue
+            has_content_disposition = has_content_disposition or lower == "content-disposition"
+            self.send_header(name, value)
+        if not has_content_disposition and parse_qs(query).get("download") == ["1"]:
+            stamp = dt.datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
+            self.send_header(
+                "Content-Disposition",
+                f'attachment; filename="sentinel-{stamp}.jpg"',
+            )
+        self.send_header("Content-Length", str(len(frame)))
+        self.end_headers()
+        self.wfile.write(frame)
+
     def proxy_request(self) -> None:
         parsed = urlsplit(self.path)
         target = relay_target(self.relay_server.settings, parsed.path, parsed.query)
@@ -472,6 +589,15 @@ class RelayRequestHandler(BaseHTTPRequestHandler):
                 timeout=timeout,
             ) as response:
                 response.raw.decode_content = False
+                if (
+                    target.kind == "snapshot"
+                    and self.command == "GET"
+                    and response.ok
+                    and response.headers.get("Content-Type", "").startswith("image/")
+                    and self.relay_server.color_correction.enabled
+                ):
+                    self.relay_corrected_snapshot(response, parsed.query)
+                    return
                 self.send_response(response.status_code)
                 response_has_length = False
                 has_content_disposition = False

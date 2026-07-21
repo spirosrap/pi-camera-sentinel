@@ -422,7 +422,7 @@ def test_dashboard_stream_has_a_latest_frame_fallback(dashboard_server):
 
     assert dashboard.status_code == 200
     assert 'id="camera-fallback"' in dashboard.text
-    assert 'data-client-version="1.17.0"' in dashboard.text
+    assert 'data-client-version="1.18.0"' in dashboard.text
     assert '<canvas class="stream-live" id="camera-stream"' in dashboard.text
     assert 'data-has-frame="false"' in dashboard.text
     assert "function inspectStreamHealth()" in script.text

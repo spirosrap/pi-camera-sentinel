@@ -3,11 +3,29 @@ import threading
 import time
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from io import BytesIO
 
 import requests
+from PIL import Image, ImageStat
 
-from pi_camera_sentinel.relay import RelayHTTPServer, RelaySettings
+from pi_camera_sentinel.relay import JpegColorCorrection, RelayHTTPServer, RelaySettings
 from pi_camera_sentinel.redirect import redirect_location
+
+
+def jpeg_bytes(color=(100, 80, 100)):
+    output = BytesIO()
+    Image.new("RGB", (32, 24), color).save(
+        output,
+        format="JPEG",
+        quality=100,
+        subsampling=0,
+    )
+    return output.getvalue()
+
+
+def mean_rgb(payload):
+    with Image.open(BytesIO(payload)) as image:
+        return ImageStat.Stat(image.convert("RGB")).mean
 
 
 class DashboardHandler(BaseHTTPRequestHandler):
@@ -110,6 +128,40 @@ class RecoveringCameraHandler(BaseHTTPRequestHandler):
         try:
             self.wfile.write(part)
             self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
+    def log_message(self, *_args):
+        pass
+
+
+class ColorCameraHandler(BaseHTTPRequestHandler):
+    frame = jpeg_bytes()
+
+    def do_GET(self):
+        if self.path.startswith("/snapshot"):
+            self.send_response(200)
+            self.send_header("Content-Type", "image/jpeg")
+            self.send_header("Content-Length", str(len(self.frame)))
+            self.end_headers()
+            self.wfile.write(self.frame)
+            return
+
+        self.send_response(200)
+        self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=camera")
+        self.end_headers()
+        part = (
+            b"--camera\r\nContent-Type: image/jpeg\r\nContent-Length: "
+            + str(len(self.frame)).encode()
+            + b"\r\n\r\n"
+            + self.frame
+            + b"\r\n"
+        )
+        try:
+            for _ in range(20):
+                self.wfile.write(part)
+                self.wfile.flush()
+                time.sleep(0.02)
         except (BrokenPipeError, ConnectionResetError):
             pass
 
@@ -239,6 +291,41 @@ def test_relay_keeps_viewer_attached_while_camera_stream_reconnects():
     assert b"generation-1:" in frames[0]
     assert b"generation-2:" in frames[1]
     assert RecoveringCameraHandler.stream_requests >= 2
+
+
+def test_relay_color_correction_applies_to_snapshot_and_stream():
+    dashboard = ThreadingHTTPServer(("127.0.0.1", 0), DashboardHandler)
+    camera = ThreadingHTTPServer(("127.0.0.1", 0), ColorCameraHandler)
+    camera_url = f"http://127.0.0.1:{camera.server_port}"
+    settings = RelaySettings(
+        host="127.0.0.1",
+        port=0,
+        dashboard_url=f"http://127.0.0.1:{dashboard.server_port}",
+        stream_url=f"{camera_url}/stream",
+        snapshot_url=f"{camera_url}/snapshot",
+        green_gain=1.5,
+        jpeg_quality=95,
+    )
+    relay = RelayHTTPServer((settings.host, settings.port), settings)
+
+    with running_server(dashboard), running_server(camera), running_server(relay):
+        base = f"http://127.0.0.1:{relay.server_port}"
+        snapshot = requests.get(f"{base}/snapshot?download=1", timeout=2)
+        with requests.get(f"{base}/stream", timeout=2, stream=True) as stream:
+            stream_frame = read_one_frame(stream)
+
+    source_mean = mean_rgb(ColorCameraHandler.frame)
+    for corrected in (snapshot.content, stream_frame):
+        corrected_mean = mean_rgb(corrected)
+        assert corrected_mean[1] > source_mean[1] + 30
+        assert abs(corrected_mean[0] - source_mean[0]) < 5
+        assert abs(corrected_mean[2] - source_mean[2]) < 5
+    assert snapshot.headers["Content-Disposition"].startswith("attachment;")
+
+
+def test_disabled_color_correction_preserves_original_jpeg_bytes():
+    frame = jpeg_bytes()
+    assert JpegColorCorrection().apply(frame) is frame
 
 
 def test_relay_rewrites_host_and_origin_for_dashboard_writes():

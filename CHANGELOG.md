@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.18.0 - 2026-07-21
+
+- Add optional per-channel JPEG color correction on the capable relay host.
+- Apply the same correction to live MJPEG frames and downloaded or displayed snapshots.
+- Preserve the original no-reencoding relay path when all channel gains remain at their default value.
+
 ## 1.17.0 - 2026-07-17
 
 - Keep the last rendered frame unobstructed during transport reconnects that recover within 15 seconds.

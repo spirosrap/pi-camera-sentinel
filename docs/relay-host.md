@@ -14,7 +14,18 @@ The relay fans all `/stream` viewers out from one lazy upstream MJPEG connection
 
 If the Pi stream stalls, the relay reconnects that one upstream connection while keeping browser viewers attached. `SENTINEL_RELAY_STREAM_READ_TIMEOUT` controls how quickly a stalled upstream is replaced; `SENTINEL_RELAY_STREAM_CLIENT_TIMEOUT` controls how long an attached viewer waits through recovery. The defaults are 10 and 90 seconds respectively. `SENTINEL_RELAY_STREAM_IDLE_TIMEOUT` keeps the Pi connection warm for 30 seconds across brief viewer reconnects.
 
-The relay preserves the original JPEG frame bytes. It does not resize or re-encode them, so resolution, quality, and frame rate remain controlled by `ustreamer` on the Pi.
+By default, the relay preserves the original JPEG frame bytes. It does not resize or re-encode them, so resolution, quality, and frame rate remain controlled by `ustreamer` on the Pi.
+
+If a webcam has a consistent color cast that its UVC controls cannot remove, the relay can apply lightweight per-channel correction to both `/stream` and `/snapshot`. For example, a camera with weak green output can use:
+
+```text
+SENTINEL_RELAY_RED_GAIN=1
+SENTINEL_RELAY_GREEN_GAIN=1.2
+SENTINEL_RELAY_BLUE_GAIN=1
+SENTINEL_RELAY_JPEG_QUALITY=90
+```
+
+Any gain other than `1` enables JPEG decoding and re-encoding on the relay host. Keep this disabled on resource-constrained relays and tune gains in small increments.
 
 ## Install
 
