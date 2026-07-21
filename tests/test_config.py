@@ -1,6 +1,32 @@
 from pi_camera_sentinel.config import Settings
 
 
+def test_small_animal_motion_defaults(monkeypatch):
+    names = (
+        "SENTINEL_POLL_SECONDS",
+        "MOTION_POLL_SECONDS",
+        "SENTINEL_COOLDOWN_SECONDS",
+        "MOTION_COOLDOWN_SECONDS",
+        "SENTINEL_CHANGED_RATIO",
+        "MOTION_CHANGED_RATIO",
+        "SENTINEL_RESIZE_WIDTH",
+        "MOTION_RESIZE_WIDTH",
+        "SENTINEL_RESIZE_HEIGHT",
+        "MOTION_RESIZE_HEIGHT",
+    )
+    for name in names:
+        monkeypatch.delenv(name, raising=False)
+
+    settings = Settings.from_env()
+
+    assert settings.poll_seconds == 0.5
+    assert settings.cooldown_seconds == 30.0
+    assert settings.changed_ratio == 0.008
+    assert settings.min_motion_frames == 2
+    assert settings.resize_width == 320
+    assert settings.resize_height == 180
+
+
 def test_legacy_motion_environment_aliases(monkeypatch, tmp_path):
     monkeypatch.delenv("SENTINEL_OUTPUT_DIR", raising=False)
     monkeypatch.delenv("SENTINEL_CHANGED_RATIO", raising=False)

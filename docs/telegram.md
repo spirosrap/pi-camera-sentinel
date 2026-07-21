@@ -54,7 +54,7 @@ Use cooldowns and consecutive-frame checks:
 
 ```text
 SENTINEL_MIN_FRAMES=2
-SENTINEL_COOLDOWN_SECONDS=60
+SENTINEL_COOLDOWN_SECONDS=30
 ```
 
 The cooldown begins when a completed batch is delivered.
@@ -62,8 +62,10 @@ The cooldown begins when a completed batch is delivered.
 For busy scenes, increase:
 
 ```text
-SENTINEL_CHANGED_RATIO=0.05
+SENTINEL_CHANGED_RATIO=0.015
 ```
+
+The default `0.008` ratio, two samples per second, and 320 x 180 analysis frame are intended to retain small pets farther from the camera. Keep the two-frame confirmation enabled unless one-frame movement is more important than avoiding brief lighting or foliage alerts.
 
 ## Quiet Hours
 

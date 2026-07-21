@@ -290,12 +290,15 @@ sudo systemctl enable --now pi-camera-exposure-watchdog.service
 
 ## Motion Tuning
 
-The default motion settings are deliberately conservative:
+The default motion settings are tuned to retain small pets across a wide camera view while still requiring two consecutive changed frames:
 
 ```text
-SENTINEL_CHANGED_RATIO=0.035
+SENTINEL_POLL_SECONDS=0.5
+SENTINEL_CHANGED_RATIO=0.008
 SENTINEL_MIN_FRAMES=2
-SENTINEL_COOLDOWN_SECONDS=60
+SENTINEL_COOLDOWN_SECONDS=30
+SENTINEL_RESIZE_WIDTH=320
+SENTINEL_RESIZE_HEIGHT=180
 SENTINEL_ALERT_BATCH_SECONDS=8
 SENTINEL_ALERT_BATCH_MAX_PHOTOS=4
 ```
@@ -306,7 +309,7 @@ Sample the current scene:
 pi-camera-sentinel sample 10
 ```
 
-If the scene is noisy, increase `SENTINEL_CHANGED_RATIO`. If small motion is missed, lower it.
+If the scene is noisy, increase `SENTINEL_CHANGED_RATIO` in small steps or mask moving foliage. If distant pets are still missed, lower it slightly. Higher analysis resolution preserves small subjects but costs more CPU; the 320 x 180 default remained comfortable on a Raspberry Pi 3B+ during field testing.
 
 Nearby detections are collected for eight seconds and delivered as one Telegram album containing up to four representative frames. The first frame is retained and the newest frame continually replaces the final slot after the limit is reached. Set `SENTINEL_ALERT_BATCH_SECONDS=0` for immediate single-photo alerts. The normal cooldown starts when a batch is delivered.
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.18.1 - 2026-07-21
+
+- Tune motion defaults to retain small pets farther from a wide-angle camera.
+- Sample twice per second at 320 x 180 with a 0.8% changed-area trigger.
+- Keep two-frame confirmation and a 30-second cooldown to limit brief-noise alerts.
+
 ## 1.18.0 - 2026-07-21
 
 - Add optional per-channel JPEG color correction on the capable relay host.
